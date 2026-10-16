@@ -1,0 +1,13 @@
+﻿{
+	"languageTag": "en-US",
+	"fileDescription": "Strings for the Dark theme.",
+	"text": {
+		"themes": {
+			"dark": {
+				"name": "Dark",
+				"description": "A clean dark theme with enhanced color coding.",
+				"help-url": "https://www.construct.net"
+			}
+		}
+	}
+}

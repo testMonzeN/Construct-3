@@ -1,0 +1,45 @@
+# Lectures / large media (не в git — гигабайты)
+лекции/
+*.mp4
+*.mkv
+*.avi
+*.mov
+
+# Домашки ОПД — локально, не в репо
+ДЗ/
+
+# Тестовая Dota2D — не основной проект (основной = EchoKnight)
+Dota2D.c3p
+Dota2D_*.md
+Dota2D/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+Desktop.ini
+.vscode/
+.idea/
+
+# Node / temp
+node_modules/
+npm-debug.log*
+*.log
+__pycache__/
+*.pyc
+.venv/
+
+# Build unpack (в репо оставляем готовые .c3p)
+build/
+*.zip
+*.tmp
+*._tmp*
+
+# OCR / frame dumps
+tools/ocr/
+tools/**/frames/
+tools/**/*.png.bak
+
+# OneDrive / Excel locks
+~$*
+*.xlsx._tmp.xlsx
+ДЗ/
