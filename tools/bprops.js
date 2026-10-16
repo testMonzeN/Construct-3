@@ -1,4 +1,4 @@
-// Lists editor property ids/defaults for behaviors (from allEditorBehaviors.js)
+// Список id и значений по умолчанию для свойств behaviors
 const s = require("fs").readFileSync(__dirname + "/ref/allEditorBehaviors.js", "utf8");
 const want = (process.argv[2] || "Bullet,Fade,Rotate,Flash,MoveTo,bound,destroy,Timer").split(",");
 for (const id of want) {

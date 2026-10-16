@@ -1,4 +1,4 @@
-// Minimal RGBA canvas + PNG encoder (no dependencies)
+// Простой RGBA-холст и кодировщик PNG (без зависимостей)
 const zlib = require("zlib");
 
 const CRC_TABLE = (() => {
@@ -90,7 +90,7 @@ class Canvas {
 				if (w0 >= -0.01 && w1 >= -0.01 && w2 >= -0.01) this.set(x, y, c);
 			}
 	}
-	// Adds a 1px outline around opaque pixels
+	// Обводка 1px вокруг непрозрачных пикселей
 	outline(c = "#120c0c") {
 		const copy = new Uint8Array(this.px);
 		const alpha = (x, y) => (x < 0 || y < 0 || x >= this.w || y >= this.h ? 0 : copy[(y * this.w + x) * 4 + 3]);

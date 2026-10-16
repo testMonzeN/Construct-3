@@ -1,5 +1,5 @@
-// Echo Knight — Soul Knight-like roguelike for Construct 3 (exactly 50 events)
-// Usage: node tools/build_echo.js
+// Эхо-Рыцарь — роглайк на Construct 3 (ровно 50 событий)
+// Запуск: node tools/build_echo.js
 const fs = require("fs");
 const path = require("path");
 const { execFileSync } = require("child_process");
@@ -211,7 +211,7 @@ const msg = (y, text, color) => [
 	A("MsgText", "set-font-color", { color }),
 ];
 
-// ===== objects =====
+// ===== объекты =====
 singleGlobal("Mouse", "Mouse");
 singleGlobal("Keyboard", "Keyboard");
 
@@ -266,7 +266,7 @@ const PauseText = textType("PauseText");
 const Label = textType("Label");
 const InfoText = textType("InfoText");
 
-// ===== layouts =====
+// ===== макеты =====
 const RELICS = [
 	["heal", "Импульс лечения", "Реликвия Q: лечит 35% HP. Этаж 3×3 — смотри миникарту справа."],
 	["shield", "Барьер", "Реликвия Q: 2.5 сек щита. На карте: синяя = ты, зелёная = зачищено, B/F = босс/кузница."],
@@ -288,7 +288,7 @@ function minimapCells() {
 	return out;
 }
 
-/** Стены комнаты с проёмами под двери N/E/S/W (Soul Knight-камера). origin стены — top-left. */
+	/** Стены комнаты с проёмами под двери. Начало координат стены — левый верх. */
 function roomWalls() {
 	const T = 40;
 	const out = [];
@@ -309,7 +309,7 @@ function roomWalls() {
 layout("Menu", "Menu_ev", [
 	layer("Menu", [
 		textInst(Label, 0, 36, 1280, 60, "ЭХО-РЫЦАРЬ", { size: 36, align: "center", color: "#7ec8ff" }),
-		textInst(Label, 0, 96, 1280, 30, "Roguelike · карта этажа 3×3 · комнаты с врагами · кузница ядер", { size: 13, align: "center", color: "#b0b8c8", bold: false }),
+		textInst(Label, 0, 96, 1280, 30, "Роглайк · карта этажа 3×3 · комнаты с врагами · кузница ядер", { size: 13, align: "center", color: "#b0b8c8", bold: false }),
 		...RELICS.map(([id, , desc], i) => spriteInst(RelicCard, 340 + i * 300, 320, { frame: i, vars: { RelicID: id, Desc: desc } })),
 		...RELICS.map(([, title], i) => textInst(Label, 340 + i * 300 - 120, 430, 240, 28, title, { size: 15, align: "center", color: "#ffffff" })),
 		textInst(InfoText, 160, 500, 960, 100, "", { size: 13, align: "center", color: "#e6e6e6", bold: false }),
@@ -353,7 +353,7 @@ layout("Game", "Game_ev", [
 	], { transparent: true, parallax: 0 }),
 ]);
 
-// ===== events =====
+// ===== события =====
 const eventSheets = [];
 function sheet(name, events) {
 	eventSheets.push(name);
@@ -412,7 +412,7 @@ const spawnEnemyActions = (x, y, anim) => [
 ];
 
 sheet("Game_ev", [
-	Comment("Эхо-Рыцарь: этаж 3×3 как Soul Knight, враги в комнатах, кузница ядер на карте."),
+	Comment("Эхо-Рыцарь: этаж 3×3, враги в комнатах, кузница ядер на карте."),
 	Var("RelicType", "string", "heal"),
 	Var("Gold", "number", 0),
 	Var("RoomX", "number", 1),
@@ -820,7 +820,7 @@ sheet("Game_ev", [
 
 ]);
 
-// ===== project =====
+// ===== проект =====
 const used = (type, id, name) => ({ type, id, name, author: "Scirra", bundled: false });
 const icons = ["icon-16.png", "icon-32.png", "icon-114.png", "icon-128.png", "icon-256.png", "loading-logo.png"];
 const iconDir = path.join(__dirname, "ex", "spell-caster", "icons");
@@ -864,7 +864,7 @@ writeJSON("project.c3proj", {
 	},
 	timelines: { items: [], subfolders: [] }, flowcharts: { items: [], subfolders: [] },
 	properties: {
-		description: "Echo Knight — Soul Knight-like room map roguelike with echo-core forge.",
+		description: "Эхо-Рыцарь — комнатный роглайк с картой этажа и кузницей ядер эха.",
 		version: "1.0.0.0", author: "", authorEmail: "", authorWebsite: "",
 		appId: "com.example.echoknight", pixelRounding: false, zAxisScale: "normalized",
 		fov: 0.7853981633974483, useLoaderLayout: false, fullscreenMode: "letterbox-scale",

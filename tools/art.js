@@ -1,11 +1,11 @@
-// Procedural pixel art for the game. All characters are top-down and face right (angle 0).
+// Процедурный пиксель-арт. Персонажи сверху, смотрят вправо (угол 0).
 const { Canvas } = require("./png");
 
 function rng(seed) {
 	return () => ((seed = (seed * 1664525 + 1013904223) >>> 0) / 4294967296);
 }
 
-// ---------- heroes (26x26 logical) ----------
+// ---------- герои (26x26) ----------
 function drawSF(c, ox = 0, oy = 0) {
 	c.ellipse(ox + 11, oy + 13, 8, 11, "#3b0a0e");
 	c.ellipse(ox + 11, oy + 13, 7, 10, "#6e1015");
@@ -61,7 +61,7 @@ function hero(drawFn) {
 	return c.outline().scale(3);
 }
 
-// ---------- creeps (16x16 logical) ----------
+// ---------- крипы (16x16) ----------
 function creepMelee() {
 	const c = new Canvas(16, 16);
 	c.disc(7, 8, 6, "#5a1c12");
@@ -86,7 +86,7 @@ function creepRanged() {
 	return c.outline().scale(3);
 }
 
-// ---------- projectiles / effects ----------
+// ---------- снаряды / эффекты ----------
 function heroBullet() {
 	const c = new Canvas(9, 9);
 	c.disc(4, 4, 4, "#8a0f10");
@@ -136,7 +136,7 @@ function grass() {
 	return c.scale(2);
 }
 
-// ---------- shop icons (16x16 logical, 7 frames) ----------
+// ---------- иконки магазина (16x16, 7 кадров) ----------
 function iconBase() {
 	const c = new Canvas(16, 16);
 	c.rect(0, 0, 16, 16, "#8a7442");
@@ -161,7 +161,7 @@ function shopIcon(i) {
 	return c.scale(4);
 }
 
-// ---------- hero cards for the menu (40x52 logical) ----------
+// ---------- карточки героев в меню (40x52) ----------
 function heroCard(drawFn, bg, accent) {
 	const c = new Canvas(40, 52);
 	c.rect(0, 0, 40, 52, accent);

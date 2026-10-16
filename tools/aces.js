@@ -1,4 +1,4 @@
-// Usage: node tools/aces.js <regex>  — prints matching ACE ids with params from Construct's allAces.json
+// Запуск: node tools/aces.js <regex> — печатает id ACE и параметры
 const plugins = require("./ref/pluginAces.json");
 const behaviors = require("./ref/behaviorAces.json");
 const re = new RegExp(process.argv[2] || ".", "i");

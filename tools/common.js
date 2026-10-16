@@ -1,4 +1,4 @@
-// Extracts common ACE definitions (t.Qcs = condition, t.Jcs = action) from editor main.js
+// Достаёт общие ACE (условие/действие) из editor main.js
 const s = require("fs").readFileSync(__dirname + "/ref/main.js", "utf8");
 const start = s.indexOf('id:"compare-instance-variable"') - 40000;
 const end = start + 90000;

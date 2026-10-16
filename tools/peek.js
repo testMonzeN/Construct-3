@@ -1,4 +1,4 @@
-// Usage: node tools/peek.js <file> <needle> [before] [after]
+// Запуск: node tools/peek.js <файл> <строка> [до] [после]
 const s = require("fs").readFileSync(process.argv[2], "utf8");
 const needle = process.argv[3];
 const before = Number(process.argv[4] || 300), after = Number(process.argv[5] || 1500);

@@ -1,5 +1,5 @@
-// Generates the Construct 3 project "Dota 2D: Farm Arena" as a project folder and a .c3p file.
-// Usage: node tools/build.js
+// Собирает проект Construct 3 «Dota 2D: Фарм Арена» (папка + .c3p). Тестовый билд.
+// Запуск: node tools/build.js
 const fs = require("fs");
 const path = require("path");
 const { execFileSync } = require("child_process");
@@ -9,7 +9,7 @@ const ROOT = path.resolve(__dirname, "..");
 const OUT_DIR = path.join(ROOT, "build", "Dota2D");
 const C3P = path.join(ROOT, "Dota2D.c3p");
 
-// ---------- ids ----------
+// ---------- id ----------
 let sidCounter = 0;
 const sid = () => 100000000000000 + ((sidCounter++ * 7919 + 12345) % 899999999999999);
 let uidCounter = 0;
@@ -17,12 +17,12 @@ const uid = () => uidCounter++;
 let imgCounter = 1000000;
 const imgId = () => imgCounter++;
 
-// ---------- files ----------
+// ---------- файлы ----------
 const files = new Map();
 const writeJSON = (rel, obj) => files.set(rel, Buffer.from(JSON.stringify(obj, null, "\t")));
 const writeBin = (rel, buf) => files.set(rel, buf);
 
-// ---------- object types ----------
+// ---------- типы объектов ----------
 const objectTypes = [];
 
 function frameJSON(canvas, origin) {
@@ -49,7 +49,7 @@ function behaviorTypes(list) {
 	return (list || []).map(([behaviorId, name]) => ({ behaviorId, name, sid: sid() }));
 }
 
-// anims: { AnimName: [canvas, canvas, ...] }
+// анимации: { Имя: [холст, холст, ...] }
 function sprite(name, anims, opts = {}) {
 	const items = [];
 	for (const [animName, frames] of Object.entries(anims)) {
@@ -133,7 +133,7 @@ function singleGlobal(name, pluginId) {
 	});
 }
 
-// ---------- instances ----------
+// ---------- экземпляры ----------
 const WHITE = [1, 1, 1, 1];
 
 function world(x, y, w, h, origin) {
@@ -265,9 +265,9 @@ function layout(name, eventSheet, layers) {
 	});
 }
 
-// ---------- event DSL ----------
+// ---------- DSL событий ----------
 const CMP = { "=": 0, "!=": 1, "<": 2, "<=": 3, ">": 4, ">=": 5 };
-const q = s => JSON.stringify(s); // quote a string literal for Construct expressions
+const q = s => JSON.stringify(s); // строковый литерал для выражений Construct
 
 function C(objectClass, id, parameters, extra = {}) {
 	const c = { id, objectClass, sid: sid() };
@@ -306,7 +306,7 @@ function Fn(name, params, actions, children) {
 const Var = (name, type, initialValue) => ({ eventType: "variable", name, type, initialValue: String(initialValue), comment: "", isStatic: false, isConstant: false, sid: sid() });
 const Comment = text => ({ eventType: "comment", text });
 
-// common condition/action helpers
+// частые условия и действия
 const sys = (id, p) => C("System", id, p);
 const varIs = (v, op, value) => sys("compare-eventvar", { variable: v, comparison: CMP[op], value: String(value) });
 const setVar = (v, value) => A("System", "set-eventvar-value", { variable: v, value: String(value) });
@@ -341,7 +341,7 @@ const msg = (y, text, color) => [
 const KEY = { Q: 81, W: 87, R: 82, P: 80 };
 
 // ======================================================================
-// Object types
+// Типы объектов
 // ======================================================================
 singleGlobal("Mouse", "Mouse");
 singleGlobal("Keyboard", "Keyboard");
@@ -378,7 +378,7 @@ const Label = textType("Label");
 const InfoText = textType("InfoText");
 
 // ======================================================================
-// Layouts
+// Макеты
 // ======================================================================
 const HEROES = [
 	["SF", "Shadow Fiend", "Shadow Fiend — дальний бой. За каждого добитого крипа получает душу (до 20), каждая душа даёт +2 урона.\nQ — Requiem of Souls: взрыв душ вокруг героя.  W — Shadowraze: удар в точку в сторону курсора."],
@@ -445,7 +445,7 @@ layout("Game", "Game_ev", [
 ]);
 
 // ======================================================================
-// Event sheets
+// Листы событий
 // ======================================================================
 const eventSheets = [];
 function sheet(name, events) {
@@ -453,7 +453,7 @@ function sheet(name, events) {
 	writeJSON(`eventSheets/${name}.json`, { name, events, sid: sid() });
 }
 
-// ---------------- Menu (3 events) ----------------
+// ---------------- Меню (3 события) ----------------
 sheet("Menu_ev", [
 	Comment("Меню выбора героя. Глобальные переменные объявлены в листе Game_ev."),
 	E([sys("every-tick")], [A("HeroCard", "set-opacity", { opacity: "60" })]),
@@ -468,7 +468,7 @@ sheet("Menu_ev", [
 ]);
 const menuEvents = eventCount;
 
-// ---------------- Game ----------------
+// ---------------- Игра ----------------
 const heroName = `(HeroType = "SF" ? "Shadow Fiend" : (HeroType = "AM" ? "Anti-Mage" : "Juggernaut"))`;
 const qName = `(HeroType = "SF" ? "Requiem of Souls" : (HeroType = "AM" ? "Blink" : "Blade Fury"))`;
 const wName = `(HeroType = "SF" ? "Shadowraze" : (HeroType = "AM" ? "Mana Void" : "Healing Ward"))`;
@@ -613,7 +613,7 @@ sheet("Game_ev", [
 		A("HeroBullet", "destroy"),
 	]),
 
-	Comment("Урон по крипу. Кто добил — тот получил золото (и душу для Shadow Fiend)"),
+	Comment("Урон по крипу. Кто добил — тот получил золото (и душу для SF)"),
 	Fn("DamageCreep", [["TargetUID", "number"], ["Amount", "number"]], [], [
 		E([C("Creep", "pick-by-unique-id", { "unique-id": "TargetUID" })], [
 			subIv("Creep", "HP", "Amount"),
@@ -666,7 +666,7 @@ sheet("Game_ev", [
 	]),
 	E([key(KEY.R)], [A("System", "go-to-layout", { layout: "Menu" })]),
 
-	Comment("Shadow Fiend: Q — Requiem of Souls (взрыв душ), W — Shadowraze"),
+	Comment("Shadow Fiend: Q — взрыв душ, W — теневой удар"),
 	E([key(KEY.Q), varIs("HeroType", "=", q("SF")), varIs("QCD", "<=", 0), varIs("Souls", ">", 0), varIs("GameOver", "=", 0)], [
 		setVar("RequiemDmg", "120 + Souls * 28"),
 		setVar("Souls", "floor(Souls / 2)"),
@@ -684,7 +684,7 @@ sheet("Game_ev", [
 		E([pickBy("Creep", "distance(Creep.X, Creep.Y, PointX, PointY)", "<=", 130), forEach("Creep")], [Call("DamageCreep", "Creep.UID", "90 + Souls * 12")]),
 	]),
 
-	Comment("Anti-Mage: Q — Blink к курсору, W — Mana Void по крипу у курсора"),
+	Comment("Anti-Mage: Q — прыжок к курсору, W — урон по крипу у курсора"),
 	E([key(KEY.Q), varIs("HeroType", "=", q("AM")), varIs("QCD", "<=", 0), varIs("GameOver", "=", 0)], [
 		...fx("Hero.X", "Hero.Y", 70, "rgbEx(60, 30, 100)"),
 		setVar("PointX", `Hero.X + cos(${mouseAngle}) * min(450, distance(Hero.X, Hero.Y, Mouse.X, Mouse.Y))`),
@@ -701,7 +701,7 @@ sheet("Game_ev", [
 		Call("DamageCreep", "Creep.UID", "(Creep.MaxHP - Creep.HP) * 1.6 + 180"),
 	]),
 
-	Comment("Juggernaut: Q — Blade Fury, W — Healing Ward"),
+	Comment("Juggernaut: Q — круговая ярость, W — тотем лечения"),
 	E([key(KEY.Q), varIs("HeroType", "=", q("JUGG")), varIs("QCD", "<=", 0), varIs("GameOver", "=", 0)], [
 		setVar("BladeFury", 1),
 		setVar("QCD", 16),
@@ -757,7 +757,7 @@ sheet("Game_ev", [
 ]);
 
 // ======================================================================
-// Project file
+// Файл проекта
 // ======================================================================
 const used = (type, id, name) => ({ type, id, name, author: "Scirra", bundled: false });
 const icons = ["icon-16.png", "icon-32.png", "icon-114.png", "icon-128.png", "icon-256.png", "loading-logo.png"];
@@ -851,7 +851,7 @@ writeJSON("project.c3proj", {
 });
 
 // ======================================================================
-// Write folder + .c3p
+// Запись папки и .c3p
 // ======================================================================
 fs.rmSync(OUT_DIR, { recursive: true, force: true });
 for (const [rel, buf] of files) {

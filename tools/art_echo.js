@@ -1,4 +1,4 @@
-// Pixel art for Echo Knight roguelike
+// Пиксель-арт для Эхо-Рыцаря
 const { Canvas } = require("./png");
 
 function outlineScale(c, s = 3) {
@@ -172,10 +172,10 @@ function mapFrame() {
 	c.rect(0, 0, 140, 168, "#0c0a12");
 	c.rect(2, 2, 136, 164, "#1a2233");
 	c.rect(4, 4, 132, 160, "#121826");
-	// title bar
+	// полоска заголовка
 	c.rect(8, 8, 124, 18, "#243044");
 	c.rect(10, 10, 120, 14, "#1a2838");
-	// soft grid of corridors behind cells
+	// коридоры между клетками
 	const ox = 22, oy = 40, step = 34, cell = 26;
 	for (let y = 0; y < 3; y++)
 		for (let x = 0; x < 3; x++) {
@@ -183,7 +183,7 @@ function mapFrame() {
 			if (x < 2) c.rect(cx + cell, cy + 10, step - cell, 6, "#2a3548");
 			if (y < 2) c.rect(cx + 10, cy + cell, 6, step - cell, "#2a3548");
 		}
-	// bottom legend strip
+	// полоска легенды снизу
 	c.rect(8, 142, 124, 18, "#1a2434");
 	return c;
 }
@@ -198,7 +198,7 @@ function mapCellBase(fill, border, accent) {
 
 function mapCellFog() {
 	const c = mapCellBase("#1a1e28", "#0a0c12", "#222836");
-	// fog dots
+	// точки «тумана»
 	c.set(8, 8, "#2a3040");
 	c.set(16, 10, "#2a3040");
 	c.set(11, 16, "#2a3040");
