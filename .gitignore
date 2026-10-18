@@ -1,26 +1,21 @@
-# Лекции и тяжёлое видео — не в git
 лекции/
 *.mp4
 *.mkv
 *.avi
 *.mov
 
-# Домашки ОПД — только локально
 ДЗ/
 
-# Тестовая Dota2D — основной проект EchoKnight
 Dota2D.c3p
 Dota2D_*.md
 Dota2D/
 
-# Система и редактор
 .DS_Store
 Thumbs.db
 Desktop.ini
 .vscode/
 .idea/
 
-# Node и временные файлы
 node_modules/
 npm-debug.log*
 *.log
@@ -28,17 +23,15 @@ __pycache__/
 *.pyc
 .venv/
 
-# Распаковка сборки (в репо только готовый .c3p)
 build/
 *.zip
 *.tmp
 *._tmp*
 
-# OCR и кадры
 tools/ocr/
 tools/**/frames/
 tools/**/*.png.bak
 
-# Блокировки Office / OneDrive
 ~$*
 *.xlsx._tmp.xlsx
+

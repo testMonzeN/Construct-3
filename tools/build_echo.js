@@ -156,10 +156,11 @@ const A = (objectClass, id, parameters, behavior) => C(objectClass, id, paramete
 const Call = (name, ...params) => ({ callFunction: name, sid: sid(), parameters: params.map(String) });
 
 let eventCount = 0;
-function E(conditions, actions, children) {
+function E(conditions, actions, children, opts = {}) {
 	eventCount++;
 	const ev = { eventType: "block", conditions, actions, sid: sid() };
 	if (children && children.length) ev.children = children;
+	if (opts.or) ev.isOrBlock = true;
 	return ev;
 }
 function Fn(name, params, actions, children) {
@@ -184,11 +185,18 @@ const setIv = (obj, v, value) => A(obj, "set-instvar-value", { "instance-variabl
 const addIv = (obj, v, value) => A(obj, "add-to-instvar", { "instance-variable": v, value: String(value) });
 const subIv = (obj, v, value) => A(obj, "subtract-from-instvar", { "instance-variable": v, value: String(value) });
 const key = code => C("Keyboard", "on-key-pressed", { key: code });
+const keyDown = code => C("Keyboard", "key-is-down", { key: code });
+const simMove = dir => A("Hero", "simulate-control", { control: dir }, "EightDir");
 const create = (obj, layerName, x, y) => A("System", "create-object", { "object-to-create": obj, layer: q(layerName), x: String(x), y: String(y), "create-hierarchy": false, "template-name": q("") });
 const pickBy = (obj, expr, op, value) => sys("pick-by-comparison", { object: obj, expression: expr, comparison: CMP[op], value: String(value) });
 const forEach = obj => sys("for-each", { object: obj });
 const everySec = s => sys("every-x-seconds", { "interval-seconds": String(s) });
-const KEY = { Q: 81, E: 69, R: 82, P: 80, SPACE: 32, D1: 49, D2: 50, D3: 51, D4: 52, D5: 53, D6: 54 };
+const KEY = {
+	Q: 81, E: 69, R: 82, P: 80, SPACE: 32,
+	W: 87, A: 65, S: 83, D: 68,
+	LEFT: 37, UP: 38, RIGHT: 39, DOWN: 40,
+	D1: 49, D2: 50, D3: 51, D4: 52, D5: 53, D6: 54,
+};
 
 const fadeProps = (wait, out) => ({ properties: { "fade-in-time": 0, "wait-time": wait, "fade-out-time": out, destroy: true, enabled: true, "live-preview": false } });
 const bulletProps = (speed, setAngle) => ({ properties: { speed, acceleration: 0, gravity: 0, "bounce-off-solids": false, "set-angle": setAngle, step: false, enabled: true } });
@@ -324,7 +332,7 @@ layout("Game", "Game_ev", [
 		spriteInst(Hero, 640, 400, {
 			vars: { HP: 100, MaxHP: 100, Damage: 12, AtkCD: 0, AtkRate: 0.35 },
 			behaviors: {
-				EightDir: { properties: { "max-speed": 260, acceleration: 2000, deceleration: 2000, directions: "dir-8", "set-angle": "no", "allow-sliding": true, "default-controls": true, enabled: true } },
+				EightDir: { properties: { "max-speed": 260, acceleration: 2000, deceleration: 2000, directions: "dir-8", "set-angle": "no", "allow-sliding": true, "default-controls": false, enabled: true } },
 				BoundToLayout: { properties: { "bound-by": "edge", region: "layout" } },
 				Timer: { properties: {} },
 				Flash: { properties: { enabled: true } },
@@ -376,16 +384,18 @@ const menuEvents = eventCount;
 
 const elemName = `(Element = 1 ? "ОГОНЬ" : (Element = 2 ? "ЛЁД" : (Element = 3 ? "МОЛНИЯ" : "ОБЫЧНЫЙ")))`;
 const elemAnim = `(Element = 1 ? "fire" : (Element = 2 ? "ice" : (Element = 3 ? "shock" : "normal")))`;
-// ClearedMap — ровно 9 символов "0"/"1". Пометка/чтение — явные тернарники по RoomIndex (без хрупкого mid+RoomIndex).
+// ClearedMap — ровно 9 символов "0"/"1", индекс = RoomY*3+RoomX (0..8).
+// В Construct 3 mid(text, index, len) — индекс С НУЛЯ (не с единицы!).
 function markAt(i) {
-	return `left(ClearedMap, ${i}) & "1" & mid(ClearedMap, ${i + 2}, ${9 - i - 1})`;
+	// left(0..i-1) + "1" + mid(i+1 .. конец)
+	return `left(ClearedMap, ${i}) & "1" & mid(ClearedMap, ${i + 1}, ${8 - i})`;
 }
 const markCleared = [0, 1, 2, 3, 4, 5, 6, 7, 8].reduceRight(
 	(acc, i) => `(RoomIndex = ${i} ? ${markAt(i)} : ${acc})`,
 	"ClearedMap",
 );
 const readCleared = [0, 1, 2, 3, 4, 5, 6, 7, 8].reduceRight(
-	(acc, i) => `(RoomIndex = ${i} ? (mid(ClearedMap, ${i + 1}, 1) = "1" ? 1 : 0) : ${acc})`,
+	(acc, i) => `(RoomIndex = ${i} ? (mid(ClearedMap, ${i}, 1) = "1" ? 1 : 0) : ${acc})`,
 	"0",
 );
 // В C3 оператор & — склейка строк, не логическое И. Только вложенные тернарники.
@@ -393,8 +403,8 @@ const isBossRoom = `(RoomX = 2 ? (RoomY = 0 ? 1 : 0) : 0)`;
 const isForgeRoom = `(RoomX = 2 ? (RoomY = 1 ? 1 : 0) : 0)`;
 const isStartRoom = `(RoomX = 1 ? (RoomY = 1 ? 1 : 0) : 0)`;
 const roomsCleared = `len(replace(ClearedMap, "0", ""))`;
-// анимация клетки миникарты: ты / зачищено / босс / кузница / туман
-const mapAnim = `(RoomIndex = Self.Idx ? "here" : (mid(ClearedMap, Self.Idx + 1, 1) = "1" ? "clear" : (Self.Kind = 2 ? "boss" : (Self.Kind = 1 ? "forge" : "fog"))))`;
+// миникарта: ты / зачищено / босс / кузница / туман (mid — с нуля)
+const mapAnim = `(RoomIndex = Self.Idx ? "here" : (mid(ClearedMap, Self.Idx, 1) = "1" ? "clear" : (Self.Kind = 2 ? "boss" : (Self.Kind = 1 ? "forge" : "fog"))))`;
 const bulletDmg = `Hero.Damage + (Element = 1 ? 6 : 0) + (Element = 2 ? 3 : 0) + (Element = 3 ? 4 : 0) + Floor((${roomsCleared}) / 2)`;
 const forgeHud = `"КУЗНИЦА ЭХА  (комната карты)" & newline & newline & "1 — ОГОНЬ (" & CoreFire & ")  2 — ЛЁД (" & CoreIce & ")  3 — МОЛНИЯ (" & CoreShock & ")" & newline & "4 — +30 HP / 40з   5 — +4 урона / 60з   6 — +20 макс.HP / 80з" & newline & "Золото: " & Gold & "     Стихия: " & ${elemName} & newline & newline & "Выход — в открытую дверь на карте этажа"`;
 
@@ -481,7 +491,17 @@ sheet("Game_ev", [
 		A("StatsText", "set-text", {
 			text: `"Клетка " & RoomX & "," & RoomY & "   Зачищено: " & ${roomsCleared} & "/9   Убито: " & Kills & newline & "Золото: " & Gold & "   Ядра F/I/S: " & CoreFire & "/" & CoreIce & "/" & CoreShock & "   " & ${elemName} & newline & "Реликвия: " & RelicType & (RelicCD > 0 ? " (" & ceil(RelicCD) & "с)" : " ГОТОВА") & (Shield > 0 ? "  [ЩИТ]" : "")`,
 		}),
+	], [
+		E([forEach("MapCell")], [
+			A("MapCell", "set-animation", { animation: mapAnim, from: "beginning" }),
+		]),
 	]),
+
+	Comment("Движение WASD (стрелки тоже работают)"),
+	E([keyDown(KEY.W), keyDown(KEY.UP)], [simMove("up")], null, { or: true }),
+	E([keyDown(KEY.S), keyDown(KEY.DOWN)], [simMove("down")], null, { or: true }),
+	E([keyDown(KEY.A), keyDown(KEY.LEFT)], [simMove("left")], null, { or: true }),
+	E([keyDown(KEY.D), keyDown(KEY.RIGHT)], [simMove("right")], null, { or: true }),
 
 	Comment("Стрельба"),
 	E([C("Mouse", "on-click", { "mouse-button": "left", "click-type": "clicked" }), ivIs("Hero", "AtkCD", "<=", 0), varIs("GameOver", "=", 0), varIs("InForge", "=", 0)], [
@@ -572,22 +592,30 @@ sheet("Game_ev", [
 		]),
 	]),
 
-	Comment("Комната зачищена → двери (только если реально никого не осталось)"),
+	Comment("Зачистка: нет врагов → пометить ТОЛЬКО текущую клетку; босс (2,0) = победа"),
 	E([
-		varIs("SpawnReady", "=", 1), varIs("EnemiesAlive", "<=", 0), cmp2("Enemy.Count", "=", 0),
+		varIs("SpawnReady", "=", 1), cmp2("Enemy.Count", "=", 0),
 		varIs("RoomClear", "=", 0), varIs("GameOver", "=", 0), sys("trigger-once-while-true"),
 	], [
-		setVar("RoomIndex", "RoomY * 3 + RoomX"),
-		setVar("RoomClear", 1),
-		setVar("CellCleared", 1),
-		setVar("ClearedMap", markCleared),
-		setVar("RoomsDone", roomsCleared),
-		Call("OpenDoors"),
-		Call("RefreshMap"),
-		...msg(90, q("Комната зачищена! Выбери дверь"), "rgbEx(40, 100, 40)"),
+		Call("MarkCurrentCleared"),
+	], [
+		E([varIs("RoomX", "=", 2), varIs("RoomY", "=", 0), varIs("Won", "=", 0)], [
+			setVar("BossAlive", 0),
+			setVar("Won", 1),
+			setVar("GameOver", 1),
+			A("Hero", "set-ignoring-input", { input: "start-ignoring" }, "EightDir"),
+			A("GameOverText", "set-visible", { visibility: "visible" }),
+			A("GameOverText", "set-font-color", { color: "rgbEx(40, 100, 50)" }),
+			A("GameOverText", "set-text", { text: `"ЭТАЖ ПРОЙДЕН!" & newline & newline & "Убито: " & Kills & "   Комнат: " & ${roomsCleared} & "/9" & newline & newline & "R — новый забег"` }),
+			A("System", "set-time-scale", { "time-scale": "0" }),
+		]),
+		E([cmp2(isBossRoom, "=", 0)], [
+			Call("OpenDoors"),
+			...msg(90, q("Комната зачищена! Выбери дверь"), "rgbEx(40, 100, 40)"),
+		]),
 	]),
 
-	Comment("Переход в соседнюю комнату по двери"),
+	Comment("Переход по двери"),
 	E([C("Hero", "on-collision-with-another-object", { object: "Door" }), varIs("RoomClear", "=", 1), varIs("DoorCD", "<=", 0), varIs("GameOver", "=", 0)], [
 		setVar("EntryDir", "Door.Dir"),
 		setVar("NX", "max(0, min(2, RoomX + (Door.Dir = 1 ? 1 : (Door.Dir = 3 ? -1 : 0))))"),
@@ -595,25 +623,18 @@ sheet("Game_ev", [
 		setVar("DoorCD", 0.8),
 		A("Door", "destroy"),
 	], [
-		// Не перезагружать ту же клетку (дверь на краю карты)
-		E([cmp2("NX", "!=", "RoomX")], [
+		E([cmp2("NX + NY * 3", "!=", "RoomX + RoomY * 3")], [
 			setVar("RoomX", "NX"),
 			setVar("RoomY", "NY"),
 			setVar("RoomIndex", "RoomY * 3 + RoomX"),
 			Call("LoadRoom"),
 		]),
-		E([cmp2("NX", "=", "RoomX"), cmp2("NY", "!=", "RoomY")], [
-			setVar("RoomX", "NX"),
-			setVar("RoomY", "NY"),
-			setVar("RoomIndex", "RoomY * 3 + RoomX"),
-			Call("LoadRoom"),
-		]),
-		E([cmp2("NX", "=", "RoomX"), cmp2("NY", "=", "RoomY"), varIs("CellCleared", "=", 1)], [
+		E([cmp2("NX + NY * 3", "=", "RoomX + RoomY * 3")], [
 			Call("OpenDoors"),
 		]),
 	]),
 
-	Comment("Кузница на клетке F карты"),
+	Comment("Кузница: 1–3 стихия, 4–6 покупки"),
 	E([key(KEY.D1), varIs("InForge", "=", 1), varIs("CoreFire", ">", 0)], [
 		addVar("CoreFire", -1), setVar("Element", 1),
 		...msg(520, q("Оружие: ОГОНЬ"), "rgbEx(100, 40, 10)"),
@@ -632,21 +653,34 @@ sheet("Game_ev", [
 	E([key(KEY.D4), varIs("InForge", "=", 1), varIs("Gold", ">=", 40)], [
 		A("System", "subtract-from-eventvar", { variable: "Gold", value: "40" }),
 		setIv("Hero", "HP", "min(Hero.MaxHP, Hero.HP + 30)"),
+		A("ForgeText", "set-text", { text: forgeHud }),
 		...msg(520, q("+30 HP"), "rgbEx(30, 100, 40)"),
 	]),
 	E([key(KEY.D5), varIs("InForge", "=", 1), varIs("Gold", ">=", 60)], [
 		A("System", "subtract-from-eventvar", { variable: "Gold", value: "60" }),
 		addIv("Hero", "Damage", 4),
+		A("ForgeText", "set-text", { text: forgeHud }),
 		...msg(520, q("+4 урона"), "rgbEx(100, 80, 20)"),
 	]),
 	E([key(KEY.D6), varIs("InForge", "=", 1), varIs("Gold", ">=", 80)], [
 		A("System", "subtract-from-eventvar", { variable: "Gold", value: "80" }),
 		addIv("Hero", "MaxHP", 20),
 		addIv("Hero", "HP", 20),
+		A("ForgeText", "set-text", { text: forgeHud }),
 		...msg(520, q("+20 макс. HP"), "rgbEx(30, 100, 40)"),
 	]),
 
-	Comment("Загрузка комнаты карты"),
+	// Пометить ClearedMap[RoomIndex] = 1 (mid с нуля!)
+	Fn("MarkCurrentCleared", [], [
+		setVar("RoomIndex", "RoomY * 3 + RoomX"),
+		setVar("ClearedMap", markCleared),
+		setVar("CellCleared", 1),
+		setVar("RoomClear", 1),
+		setVar("EnemiesAlive", 0),
+		setVar("RoomsDone", roomsCleared),
+	], []),
+
+	Comment("LoadRoom: очистить сцену → прочитать ClearedMap → кузница / пусто / босс / бой"),
 	Fn("LoadRoom", [], [
 		A("Enemy", "destroy"),
 		A("Door", "destroy"),
@@ -658,77 +692,76 @@ sheet("Game_ev", [
 		setVar("BossAlive", 0),
 		setVar("InForge", 0),
 		setVar("SpawnReady", 0),
-		setVar("RoomClear", "CellCleared"),
+		setVar("RoomClear", 0),
 		A("ForgeText", "set-visible", { visibility: "invisible" }),
 		A("Hero", "set-position", {
 			x: `EntryDir = 1 ? 220 : (EntryDir = 3 ? 1060 : 640)`,
 			y: `EntryDir = 0 ? 500 : (EntryDir = 2 ? 220 : 400)`,
 		}),
 		setVar("IFrames", 0.8),
-		Call("RefreshMap"),
 		...msg(70, `"Комната " & RoomX & "," & RoomY & (${isBossRoom} ? "  БОСС" : (${isForgeRoom} ? "  КУЗНИЦА" : ""))`, "rgbEx(50, 80, 120)"),
 	], [
-		E([cmp2(isForgeRoom, "=", 1)], [
+		// A) Кузница (2,1) — мобов нет
+		E([varIs("RoomX", "=", 2), varIs("RoomY", "=", 1)], [
 			setVar("InForge", 1),
-			setVar("RoomClear", 1),
+			Call("MarkCurrentCleared"),
 			setVar("SpawnReady", 1),
-			setVar("CellCleared", 1),
-			setVar("ClearedMap", markCleared),
 			A("ForgeText", "set-visible", { visibility: "visible" }),
 			A("ForgeText", "set-text", { text: forgeHud }),
 			A("Hero", "set-position", { x: "640", y: "400" }),
 			Call("OpenDoors"),
-			Call("RefreshMap"),
 		]),
-		// Повторный вход: без мобов, двери открыты
+		// B) Уже зачищена (не кузница) — мобов нет, двери сразу
 		E([varIs("CellCleared", "=", 1), cmp2(isForgeRoom, "=", 0)], [
 			setVar("RoomClear", 1),
 			setVar("SpawnReady", 1),
 			A("Hero", "set-position", { x: "640", y: "400" }),
 			Call("OpenDoors"),
-			Call("RefreshMap"),
-			...msg(110, q("Уже зачищено — двери открыты"), "rgbEx(60, 70, 90)"),
 		]),
-		E([varIs("CellCleared", "=", 0), cmp2(isBossRoom, "=", 1)], [
-			create("Enemy", "Game", "640", "300"),
-			A("Enemy", "set-animation", { animation: q("golem"), from: "beginning" }),
-			A("Enemy", "set-scale", { scale: "1.5" }),
-			setIv("Enemy", "IsBoss", 1),
-			setIv("Enemy", "MaxHP", "120 + RoomsDone * 15"),
-			setIv("Enemy", "HP", "Self.MaxHP"),
-			setIv("Enemy", "Damage", "16"),
-			setIv("Enemy", "Speed", "50"),
-			setIv("Enemy", "Bounty", "40"),
-			setIv("Enemy", "AtkCD", "0.5"),
-			A("Enemy", "set-default-color", { color: "rgbEx(100, 50, 40)" }),
-			addVar("EnemiesAlive", 1),
-			setVar("BossAlive", 1),
-			...spawnEnemyActions(300, 450, "bat"),
-			...spawnEnemyActions(980, 450, "bat"),
-			setVar("SpawnReady", 1),
-			...msg(130, q("БОСС ЗАЛА!"), "rgbEx(100, 30, 20)"),
+		// C) Босс (2,0), ещё не зачищена
+		E([varIs("CellCleared", "=", 0), varIs("RoomX", "=", 2), varIs("RoomY", "=", 0)], [
+			Call("SpawnBoss"),
 		]),
+		// D) Обычный бой
 		E([varIs("CellCleared", "=", 0), cmp2(isForgeRoom, "=", 0), cmp2(isBossRoom, "=", 0)], [
 			Call("SpawnCombat"),
 		]),
 	]),
 
-	Fn("RefreshMap", [], [], [
-		E([forEach("MapCell")], [
-			A("MapCell", "set-animation", { animation: mapAnim, from: "beginning" }),
-		]),
-	]),
+	Fn("SpawnBoss", [], [
+		setVar("RoomClear", 0),
+		setVar("EnemiesAlive", 0),
+		create("Enemy", "Game", "640", "300"),
+		A("Enemy", "set-animation", { animation: q("golem"), from: "beginning" }),
+		A("Enemy", "set-scale", { scale: "1.5" }),
+		setIv("Enemy", "IsBoss", 1),
+		setIv("Enemy", "MaxHP", "120 + RoomsDone * 15"),
+		setIv("Enemy", "HP", "Self.MaxHP"),
+		setIv("Enemy", "Damage", "16"),
+		setIv("Enemy", "Speed", "50"),
+		setIv("Enemy", "Bounty", "40"),
+		setIv("Enemy", "AtkCD", "0.5"),
+		A("Enemy", "set-default-color", { color: "rgbEx(100, 50, 40)" }),
+		addVar("EnemiesAlive", 1),
+		setVar("BossAlive", 1),
+		...spawnEnemyActions(300, 450, "bat"),
+		...spawnEnemyActions(980, 450, "bat"),
+		setVar("SpawnReady", 1),
+		...msg(130, q("БОСС ЗАЛА!"), "rgbEx(100, 30, 20)"),
+	], []),
 
 	Fn("SpawnCombat", [], [
 		A("Enemy", "destroy"),
 		setVar("EnemiesAlive", 0),
 		setVar("RoomClear", 0),
 	], [
-		E([cmp2(isStartRoom, "=", 1)], [
+		// Старт (1,1) — два слайма
+		E([varIs("RoomX", "=", 1), varIs("RoomY", "=", 1)], [
 			...spawnEnemyActions(400, 300, "slime"),
 			...spawnEnemyActions(880, 300, "slime"),
 			setVar("SpawnReady", 1),
 		]),
+		// Остальные боевые — 3 слайма + 2 летучих
 		E([cmp2(isStartRoom, "=", 0)], [
 			...spawnEnemyActions(220, 180, "slime"),
 			...spawnEnemyActions(1060, 180, "slime"),
@@ -739,37 +772,22 @@ sheet("Game_ev", [
 		]),
 	]),
 
-	// Двери в actions (не в children) — иначе Call из LoadRoom иногда не создавал их
+	// Двери только к соседям: на краю уходят за экран (−2000)
 	Fn("OpenDoors", [], [
-		create("Door", "Game", "640", "96"),
+		A("Door", "destroy"),
+		create("Door", "Game", "640", "RoomY > 0 ? 96 : -2000"),
 		A("Door", "set-animation", { animation: q("ns"), from: "beginning" }),
 		setIv("Door", "Dir", 0),
-		create("Door", "Game", "640", "624"),
+		create("Door", "Game", "640", "RoomY < 2 ? 624 : -2000"),
 		A("Door", "set-animation", { animation: q("ns"), from: "beginning" }),
 		setIv("Door", "Dir", 2),
-		create("Door", "Game", "96", "360"),
+		create("Door", "Game", "RoomX > 0 ? 96 : -2000", "360"),
 		A("Door", "set-animation", { animation: q("ew"), from: "beginning" }),
 		setIv("Door", "Dir", 3),
-		create("Door", "Game", "1184", "360"),
+		create("Door", "Game", "RoomX < 2 ? 1184 : -2000", "360"),
 		A("Door", "set-animation", { animation: q("ew"), from: "beginning" }),
 		setIv("Door", "Dir", 1),
 	], []),
-
-	Comment("Победа — только когда убит именно босс (не адды)"),
-	E([C("Enemy", "on-destroyed"), ivIs("Enemy", "IsBoss", "=", 1), varIs("Won", "=", 0), varIs("GameOver", "=", 0)], [
-		setVar("BossAlive", 0),
-		setVar("Won", 1),
-		setVar("GameOver", 1),
-		setVar("RoomClear", 1),
-		setVar("CellCleared", 1),
-		setVar("RoomIndex", "RoomY * 3 + RoomX"),
-		setVar("ClearedMap", markCleared),
-		A("Hero", "set-ignoring-input", { input: "start-ignoring" }, "EightDir"),
-		A("GameOverText", "set-visible", { visibility: "visible" }),
-		A("GameOverText", "set-font-color", { color: "rgbEx(40, 100, 50)" }),
-		A("GameOverText", "set-text", { text: `"ЭТАЖ ПРОЙДЕН!" & newline & newline & "Убито: " & Kills & "   Комнат: " & ${roomsCleared} & "/9" & newline & newline & "R — новый забег"` }),
-		A("System", "set-time-scale", { "time-scale": "0" }),
-	]),
 
 	Comment("Смерть / меню / пауза"),
 	E([ivIs("Hero", "HP", "<=", 0), sys("trigger-once-while-true")], [
@@ -784,38 +802,6 @@ sheet("Game_ev", [
 	E([key(KEY.P), varIs("GameOver", "=", 0)], [
 		A("System", "set-time-scale", { "time-scale": "timescale = 0 ? 1 : 0" }),
 		A("PauseText", "set-visible", { visibility: "toggle" }),
-	]),
-
-	Comment("Стихии"),
-	E([varIs("Element", "=", 1), everySec(0.5), varIs("GameOver", "=", 0), varIs("InForge", "=", 0),
-		C("Enemy", "pick-nearestfurthest", { which: "nearest", x: "Hero.X", y: "Hero.Y", z: "0", "pick-all-tied": false }),
-		cmp2("distance(Hero.X, Hero.Y, Enemy.X, Enemy.Y)", "<=", 160)], [
-		Call("DamageEnemy", "Enemy.UID", "3 + Floor(RoomsDone / 3)"),
-	]),
-	E([
-		varIs("Element", "=", 3), varIs("GameOver", "=", 0),
-		C("Enemy", "on-destroyed"),
-		cmp2("Enemy.Count", ">", 0),
-	], [], [
-		E([
-			C("Enemy", "pick-nearestfurthest", { which: "nearest", x: "Hero.X", y: "Hero.Y", z: "0", "pick-all-tied": false }),
-		], [Call("DamageEnemy", "Enemy.UID", "10 + RoomsDone")]),
-	]),
-
-	Comment("Босс роняет доп. ядра"),
-	E([C("Enemy", "on-destroyed"), ivIs("Enemy", "IsBoss", "=", 1)], [
-		create("Core", "Game", "Enemy.X + 20", "Enemy.Y"),
-		setIv("Core", "Kind", "choose(1, 2, 3)"),
-		A("Core", "set-animation", { animation: `(Self.Kind = 1 ? "fire" : (Self.Kind = 2 ? "ice" : "shock"))`, from: "beginning" }),
-		create("Core", "Game", "Enemy.X - 20", "Enemy.Y"),
-		setIv("Core", "Kind", "choose(1, 2, 3)"),
-		A("Core", "set-animation", { animation: `(Self.Kind = 1 ? "fire" : (Self.Kind = 2 ? "ice" : "shock"))`, from: "beginning" }),
-		addVar("Gold", 20),
-	]),
-
-	Comment("Реген в бою"),
-	E([everySec(4), varIs("GameOver", "=", 0), varIs("InForge", "=", 0)], [
-		setIv("Hero", "HP", "min(Hero.MaxHP, Hero.HP + 1)"),
 	]),
 
 ]);
