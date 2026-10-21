@@ -1,4 +1,4 @@
-// Эхо-Рыцарь — роглайк на Construct 3 (ровно 50 событий)
+// Эхо-Рыцарь — роглайк на Construct 3 (полный Construct — лимит событий не жмёт)
 // Запуск: node tools/build_echo.js
 const fs = require("fs");
 const path = require("path");
@@ -405,7 +405,7 @@ const isStartRoom = `(RoomX = 1 ? (RoomY = 1 ? 1 : 0) : 0)`;
 const roomsCleared = `len(replace(ClearedMap, "0", ""))`;
 // миникарта: ты / зачищено / босс / кузница / туман (mid — с нуля)
 const mapAnim = `(RoomIndex = Self.Idx ? "here" : (mid(ClearedMap, Self.Idx, 1) = "1" ? "clear" : (Self.Kind = 2 ? "boss" : (Self.Kind = 1 ? "forge" : "fog"))))`;
-const bulletDmg = `Hero.Damage + (Element = 1 ? 6 : 0) + (Element = 2 ? 3 : 0) + (Element = 3 ? 4 : 0) + Floor((${roomsCleared}) / 2)`;
+const bulletDmg = `Hero.Damage + (Element = 1 ? 6 : 0) + (Element = 2 ? 3 : 0) + (Element = 3 ? 8 : 0) + Floor((${roomsCleared}) / 2)`;
 const forgeHud = `"КУЗНИЦА ЭХА  (комната карты)" & newline & newline & "1 — ОГОНЬ (" & CoreFire & ")  2 — ЛЁД (" & CoreIce & ")  3 — МОЛНИЯ (" & CoreShock & ")" & newline & "4 — +30 HP / 40з   5 — +4 урона / 60з   6 — +20 макс.HP / 80з" & newline & "Золото: " & Gold & "     Стихия: " & ${elemName} & newline & newline & "Выход — в открытую дверь на карте этажа"`;
 
 const spawnEnemyActions = (x, y, anim) => [
@@ -448,6 +448,12 @@ sheet("Game_ev", [
 	Var("RoomIndex", "number", 4),
 	Var("CellCleared", "number", 0),
 	Var("BossAlive", "number", 0),
+	Var("BossPhase", "number", 0),
+	Var("ChainX", "number", 0),
+	Var("ChainY", "number", 0),
+	Var("HitUID", "number", 0),
+	Var("ChainTargetUID", "number", 0),
+	Var("ChainLock", "number", 0),
 	Var("NX", "number", 1),
 	Var("NY", "number", 1),
 	Var("DoorCD", "number", 0),
@@ -460,7 +466,8 @@ sheet("Game_ev", [
 		setVar("CoreFire", 0), setVar("CoreIce", 0), setVar("CoreShock", 0), setVar("Element", 0),
 		setVar("EnemiesAlive", 0), setVar("RoomClear", 0), setVar("InForge", 0), setVar("SpawnReady", 0), setVar("DoorCD", 1),
 		setVar("DashCD", 0), setVar("IFrames", 1.2), setVar("Shield", 0), setVar("RelicCD", 0),
-		setVar("GameOver", 0), setVar("Won", 0), setVar("BossAlive", 0),
+		setVar("GameOver", 0), setVar("Won", 0), setVar("BossAlive", 0), setVar("BossPhase", 0),
+		setVar("ChainX", 0), setVar("ChainY", 0), setVar("HitUID", 0), setVar("ChainTargetUID", 0), setVar("ChainLock", 0),
 		setIv("Hero", "MaxHP", 100), setIv("Hero", "HP", 100), setIv("Hero", "Damage", 12), setIv("Hero", "AtkRate", 0.35), setIv("Hero", "AtkCD", 0),
 		A("Hero", "set-ignoring-input", { input: "stop-ignoring" }, "EightDir"),
 		A("System", "set-time-scale", { "time-scale": "1" }),
@@ -512,9 +519,17 @@ sheet("Game_ev", [
 		A("HeroBullet", "set-speed", { speed: "650" }, "Bullet"),
 	]),
 
+	// Попадание пули → урон; при молнии сразу цепь по другим рядом (UID в переменных, не из SOL после create)
 	E([C("HeroBullet", "on-collision-with-another-object", { object: "Enemy" })], [
-		Call("DamageEnemy", "Enemy.UID", bulletDmg),
+		setVar("HitUID", "Enemy.UID"),
+		setVar("ChainX", "Enemy.X"),
+		setVar("ChainY", "Enemy.Y"),
+		Call("DamageEnemy", "HitUID", bulletDmg),
 		A("HeroBullet", "destroy"),
+	], [
+		E([varIs("Element", "=", 3), varIs("GameOver", "=", 0), varIs("InForge", "=", 0)], [
+			Call("ShockZap"),
+		]),
 	]),
 
 	Fn("DamageEnemy", [["TargetUID", "number"], ["Amount", "number"]], [], [
@@ -532,6 +547,34 @@ sheet("Game_ev", [
 				...fx("Enemy.X", "Enemy.Y", 40, "rgbEx(80, 60, 100)"),
 				A("Enemy", "destroy"),
 			]),
+		]),
+	]),
+
+	// Молния: бьёт ВСЕХ других врагов в радиусе от точки попадания (не того, в кого попали)
+	Fn("ShockZap", [], [
+		setVar("ChainLock", 1),
+		Call("ShockZapBody"),
+		setVar("ChainLock", 0),
+	], []),
+
+	Fn("ShockZapBody", [], [], [
+		E([
+			cmp2("Enemy.Count", ">", 0),
+			pickBy("Enemy", "distance(Enemy.X, Enemy.Y, ChainX, ChainY)", "<=", 300),
+			pickBy("Enemy", "Enemy.UID", "!=", "HitUID"),
+			forEach("Enemy"),
+		], [
+			setVar("ChainTargetUID", "Enemy.UID"),
+			Call("ShockHit"),
+		]),
+	]),
+
+	// Урон цепи только через сохранённый UID (create/fx не сбивают цель)
+	Fn("ShockHit", [], [], [
+		E([C("Enemy", "pick-by-unique-id", { "unique-id": "ChainTargetUID" })], [
+			...floatText("Enemy.X", "Enemy.Y - 40", q("ЦЕПЬ"), "rgbEx(180, 120, 255)"),
+			...fx("Enemy.X", "Enemy.Y", 55, "rgbEx(100, 40, 140)"),
+			Call("DamageEnemy", "ChainTargetUID", "18 + RoomsDone * 2"),
 		]),
 	]),
 
@@ -690,6 +733,7 @@ sheet("Game_ev", [
 		setVar("CellCleared", readCleared),
 		setVar("EnemiesAlive", 0),
 		setVar("BossAlive", 0),
+		setVar("BossPhase", 0),
 		setVar("InForge", 0),
 		setVar("SpawnReady", 0),
 		setVar("RoomClear", 0),
@@ -731,23 +775,25 @@ sheet("Game_ev", [
 	Fn("SpawnBoss", [], [
 		setVar("RoomClear", 0),
 		setVar("EnemiesAlive", 0),
+		setVar("BossPhase", 1),
 		create("Enemy", "Game", "640", "300"),
 		A("Enemy", "set-animation", { animation: q("golem"), from: "beginning" }),
-		A("Enemy", "set-scale", { scale: "1.5" }),
+		A("Enemy", "set-scale", { scale: "1.55" }),
 		setIv("Enemy", "IsBoss", 1),
-		setIv("Enemy", "MaxHP", "120 + RoomsDone * 15"),
+		setIv("Enemy", "MaxHP", "160 + RoomsDone * 18"),
 		setIv("Enemy", "HP", "Self.MaxHP"),
-		setIv("Enemy", "Damage", "16"),
-		setIv("Enemy", "Speed", "50"),
-		setIv("Enemy", "Bounty", "40"),
-		setIv("Enemy", "AtkCD", "0.5"),
+		setIv("Enemy", "Damage", "18"),
+		setIv("Enemy", "Speed", "52"),
+		setIv("Enemy", "Bounty", "50"),
+		setIv("Enemy", "AtkCD", "0.45"),
 		A("Enemy", "set-default-color", { color: "rgbEx(100, 50, 40)" }),
 		addVar("EnemiesAlive", 1),
 		setVar("BossAlive", 1),
-		...spawnEnemyActions(300, 450, "bat"),
-		...spawnEnemyActions(980, 450, "bat"),
+		...spawnEnemyActions(280, 420, "bat"),
+		...spawnEnemyActions(1000, 420, "bat"),
+		...spawnEnemyActions(640, 520, "slime"),
 		setVar("SpawnReady", 1),
-		...msg(130, q("БОСС ЗАЛА!"), "rgbEx(100, 30, 20)"),
+		...msg(130, q("БОСС ЗАЛА!  Фаза 1"), "rgbEx(100, 30, 20)"),
 	], []),
 
 	Fn("SpawnCombat", [], [
@@ -755,19 +801,22 @@ sheet("Game_ev", [
 		setVar("EnemiesAlive", 0),
 		setVar("RoomClear", 0),
 	], [
-		// Старт (1,1) — два слайма
+		// Старт (1,1) — лёгкий вход
 		E([varIs("RoomX", "=", 1), varIs("RoomY", "=", 1)], [
 			...spawnEnemyActions(400, 300, "slime"),
 			...spawnEnemyActions(880, 300, "slime"),
+			...spawnEnemyActions(640, 480, "slime"),
 			setVar("SpawnReady", 1),
 		]),
-		// Остальные боевые — 3 слайма + 2 летучих
+		// Остальные боевые — плотнее
 		E([cmp2(isStartRoom, "=", 0)], [
 			...spawnEnemyActions(220, 180, "slime"),
 			...spawnEnemyActions(1060, 180, "slime"),
 			...spawnEnemyActions(220, 540, "slime"),
-			...spawnEnemyActions(1060, 540, "bat"),
-			...spawnEnemyActions(640, 280, "bat"),
+			...spawnEnemyActions(1060, 540, "slime"),
+			...spawnEnemyActions(640, 200, "bat"),
+			...spawnEnemyActions(400, 360, "bat"),
+			...spawnEnemyActions(880, 360, "bat"),
 			setVar("SpawnReady", 1),
 		]),
 	]),
@@ -802,6 +851,65 @@ sheet("Game_ev", [
 	E([key(KEY.P), varIs("GameOver", "=", 0)], [
 		A("System", "set-time-scale", { "time-scale": "timescale = 0 ? 1 : 0" }),
 		A("PauseText", "set-visible", { visibility: "toggle" }),
+	]),
+
+	Comment("Стихия огня: DoT рядом"),
+	E([
+		varIs("Element", "=", 1), everySec(0.45), varIs("GameOver", "=", 0), varIs("InForge", "=", 0),
+		C("Enemy", "pick-nearestfurthest", { which: "nearest", x: "Hero.X", y: "Hero.Y", z: "0", "pick-all-tied": false }),
+		cmp2("distance(Hero.X, Hero.Y, Enemy.X, Enemy.Y)", "<=", 170),
+	], [
+		Call("DamageEnemy", "Enemy.UID", "4 + Floor(RoomsDone / 2)"),
+	]),
+
+	Comment("Босс: фаза 2 при ≤50% HP (временные цифры до таблицы GD)"),
+	E([
+		varIs("BossAlive", "=", 1), varIs("BossPhase", "=", 1), varIs("GameOver", "=", 0),
+		ivIs("Enemy", "IsBoss", "=", 1),
+		cmp2("Enemy.HP", "<=", "Enemy.MaxHP * 0.5"),
+		sys("trigger-once-while-true"),
+	], [
+		setVar("BossPhase", 2),
+		setIv("Enemy", "Speed", "Self.Speed + 40"),
+		setIv("Enemy", "Damage", "Self.Damage + 10"),
+		setIv("Enemy", "AtkCD", "0.25"),
+		A("Enemy", "set-scale", { scale: "1.9" }),
+		A("Enemy", "set-default-color", { color: "rgbEx(140, 25, 20)" }),
+		...spawnEnemyActions(200, 200, "bat"),
+		...spawnEnemyActions(1080, 200, "bat"),
+		...spawnEnemyActions(200, 560, "bat"),
+		...spawnEnemyActions(1080, 560, "bat"),
+		...fx("Enemy.X", "Enemy.Y", 180, "rgbEx(120, 20, 15)"),
+		...msg(140, q("ФАЗА 2 — ЯРОСТЬ!"), "rgbEx(120, 20, 15)"),
+	]),
+
+	Comment("Босс фаза 2: периодический призыв аддов"),
+	E([
+		varIs("BossAlive", "=", 1), varIs("BossPhase", "=", 2), everySec(7),
+		varIs("GameOver", "=", 0), cmp2("Enemy.Count", "<", 8),
+	], [
+		...spawnEnemyActions("choose(220, 640, 1060)", "choose(180, 360, 540)", "bat"),
+		...msg(80, q("+адд"), "rgbEx(90, 40, 30)"),
+	]),
+
+	Comment("Босс роняет доп. ядра"),
+	E([C("Enemy", "on-destroyed"), ivIs("Enemy", "IsBoss", "=", 1)], [
+		setVar("BossAlive", 0),
+		create("Core", "Game", "Enemy.X + 28", "Enemy.Y"),
+		setIv("Core", "Kind", "choose(1, 2, 3)"),
+		A("Core", "set-animation", { animation: `(Self.Kind = 1 ? "fire" : (Self.Kind = 2 ? "ice" : "shock"))`, from: "beginning" }),
+		create("Core", "Game", "Enemy.X - 28", "Enemy.Y"),
+		setIv("Core", "Kind", "choose(1, 2, 3)"),
+		A("Core", "set-animation", { animation: `(Self.Kind = 1 ? "fire" : (Self.Kind = 2 ? "ice" : "shock"))`, from: "beginning" }),
+		create("Core", "Game", "Enemy.X", "Enemy.Y - 28"),
+		setIv("Core", "Kind", "choose(1, 2, 3)"),
+		A("Core", "set-animation", { animation: `(Self.Kind = 1 ? "fire" : (Self.Kind = 2 ? "ice" : "shock"))`, from: "beginning" }),
+		addVar("Gold", 30),
+	]),
+
+	Comment("Лёгкий реген вне кузницы"),
+	E([everySec(5), varIs("GameOver", "=", 0), varIs("InForge", "=", 0)], [
+		setIv("Hero", "HP", "min(Hero.MaxHP, Hero.HP + 2)"),
 	]),
 
 ]);
