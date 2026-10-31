@@ -3,6 +3,7 @@
 
 *
 !.gitignore
+!README.md
 !EchoKnight.c3p
 !wiki/
 !wiki/**
