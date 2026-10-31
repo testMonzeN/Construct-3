@@ -245,9 +245,50 @@ const miniShowChrome = [
 	A("MiniHero", "set-visible", { visibility: "visible" }),
 	A("MiniObj", "set-visible", { visibility: "visible" }),
 ];
-/** Радиус зрения; стены режем сэмплами ProbeX/Y (без поведения LOS — ломает .c3p). */
-const VISION_RANGE = 280;
-const VISION_STEALTH = 100;
+/** ——— Баланс ECH-8 (кузницабагов) ——— */
+const VISION_RANGE = 200;
+const VISION_STEALTH = 85;
+const SILENT_STRIKE_RANGE = 50;
+const SILENT_STRIKE_CD = 6;
+const SILENT_STRIKE_ELITE_FRAC = 0.35;
+const STEALTH_SPEED = 143; // 260 * 0.55 (ECH-8)
+const HUB_HEAL_NODE = 0.25;
+const HUB_HEAL_LAYER = 0.5;
+const DROP_CORE = 0.04;
+const DROP_MOD = 0.03;
+const DROP_MOD_WOLF = 0.35;
+const DEFEND_HP_EXPR = "400 + Layer * 50";
+const BOSS_HP_EXPR = "2000 + Layer * 600 + Mission * 10 + RoomsDone * 8";
+const BOSS_DMG_EXPR = "14 + Layer * 5";
+const BOSS_SPD_EXPR = "48 + Layer * 4";
+const BOSS_ATK_CD = 0.6;
+const BOSS_P2_SPD = 25;
+const BOSS_P2_DMG = 6;
+const BOSS_P2_ATK_CD = 0.4;
+const BOSS_P2_SUMMON_SEC = 9;
+const BOSS_GOLD = 80;
+const BOSS_CORES = 2;
+const SPY_RADIUS = 90;
+const SPY_TICK = 0.25;
+/** +прогресс за тик: 100% за 12с / за 24с при Alarm */
+const SPY_PROG_OK = (100 * SPY_TICK / 12).toFixed(3);
+const SPY_PROG_ALARM = (100 * SPY_TICK / 24).toFixed(3);
+const WAVE_MAX_EXPR = "min(6, 3 + Floor(Mission / 4))";
+const RELIC_HEAL_PCT = 0.25;
+const RELIC_HEAL_CD = 20;
+const RELIC_SHIELD_T = 2.5;
+const RELIC_SHIELD_CD = 16;
+const RELIC_NOVA_R = 220;
+const RELIC_NOVA_CD = 18;
+const RELIC_NOVA_DMG = "40 + Layer * 10";
+const FORGE_HP_COST = 45;
+const FORGE_DMG_COST_BASE = 70;
+const FORGE_DMG_COST_STEP = 15;
+const FORGE_DMG_LIMIT = 5;
+const FORGE_MAXHP_COST_BASE = 90;
+const FORGE_MAXHP_COST_STEP = 20;
+const FORGE_MAXHP_LIMIT = 4;
+const VAMP_HEAL = 2;
 const visionRangeExpr = `(Stealth = 1 ? ${VISION_STEALTH} : ${VISION_RANGE})`;
 const VISION_SAMPLES = [0.12, 0.24, 0.36, 0.48, 0.6, 0.72, 0.84];
 const STEER_PROBE_SAMPLES = [0.28, 0.5, 0.72, 0.95];
@@ -301,6 +342,12 @@ const solidPushExprs = (obj) => {
 };
 const enemyWallPush = solidPushExprs("Enemy");
 const hostageWallPush = solidPushExprs("Hostage");
+const heroWallPush = solidPushExprs("Hero");
+/** Рывок: сэмплы вдоль луча + «тело» героя (~половина спрайта), стоп перед стеной. */
+const DASH_DIST = 120;
+const DASH_STEP_FRACS = [0.12, 0.24, 0.36, 0.48, 0.6, 0.72, 0.84, 0.96];
+const DASH_BODY = 30; // смещения проверки AABB вокруг центра
+const dashBodyOffsets = [[0, 0], [DASH_BODY, 0], [-DASH_BODY, 0], [0, DASH_BODY], [0, -DASH_BODY]];
 
 const fx = (x, y, size, color) => [
 	create("Fx", "Game", x, y),
@@ -352,7 +399,7 @@ const Enemy = sprite("Enemy", {
 }, {
 	vars: [
 		["HP", "number"], ["MaxHP", "number"], ["Damage", "number"], ["Speed", "number"],
-		["AtkCD", "number"], ["Bounty", "number"], ["IsBoss", "number"],
+		["AtkCD", "number"], ["Bounty", "number"], ["IsBoss", "number"], ["IsElite", "number"],
 		["Archetype", "number"], ["Agro", "number"], ["Alert", "number"],
 		["PathAng", "number"],
 	],
@@ -455,6 +502,9 @@ const FloorWeapon = sprite("FloorWeapon", {
 	ice: [art.floorGunIce()],
 	shock: [art.floorGunShock()],
 }, { origin: [0.5, 0.5] });
+const FloorHint = textType("FloorHint");
+/** FloorGun type → анимация спрайта на полу. */
+const FLOOR_ANIM_BY_GUN = { 0: "echo", 1: "fire", 2: "ice", 3: "shock" };
 const ModPickup = sprite("ModPickup", {
 	m1: [art.modSerration()],
 	m2: [art.modSpeed()],
@@ -540,9 +590,9 @@ const InfoText = textType("InfoText");
 
 // ===== макеты =====
 const RELICS = [
-	["heal", "Импульс лечения", "Реликвия Q: лечит 35% HP. Миссии-локации: истребление, волны, оборона, узел, босс."],
-	["shield", "Барьер", "Реликвия Q: 2.5 сек щита. Хаб между миссиями · F карта узлов · V планеты."],
-	["nova", "Ударная волна", "Реликвия Q: урон рядом. Выполни цель миссии → возврат в хаб."],
+	["heal", "Импульс лечения", "Эхо старых ран затягивает свежие. Мгновенно восстанавливает 25% здоровья. Перезарядка — 20 с."],
+	["shield", "Барьер", "Эхо отражает удар раньше, чем он случился. Щит на 2,5 с гасит весь входящий урон. Перезарядка — 16 с."],
+	["nova", "Ударная волна", "Эхо вырывается наружу. Урон 40+10×планета в радиусе 220 (боссам ×0,5). Перезарядка — 18 с."],
 ];
 
 /** Позиции узлов на карте миссий (как ноды Земли в Warframe). Макс. 15. */
@@ -568,7 +618,7 @@ const LAYER_META = [
 	{ layer: 1, nodes: 9, name: "Лес Эха", ground: "forest", prefix: "f", mVar: "MissionL1" },
 	{ layer: 2, nodes: 8, name: "Пепельная Луна", ground: "moon", prefix: "m", mVar: "MissionL2" },
 	{ layer: 3, nodes: 10, name: "Ржавый Марс", ground: "mars", prefix: "r", mVar: "MissionL3" },
-	{ layer: 4, nodes: 15, name: "Грозовая Церера", ground: "storm", prefix: "s", mVar: "MissionL4" },
+	{ layer: 4, nodes: 11, name: "Грозовая Церера", ground: "storm", prefix: "s", mVar: "MissionL4" },
 	{ layer: 5, nodes: 8, name: "Ледяная Европа", ground: "ice", prefix: "i", mVar: "MissionL5" },
 	{ layer: 6, nodes: 6, name: "Бездна Эха", ground: "void", prefix: "v", mVar: "MissionL6" },
 ];
@@ -678,44 +728,65 @@ function layoutCorridorsC() {
 		...mkWall(250, 200, 700, 48), ...mkWall(1950, 200, 700, 48),
 	];
 }
+/** Кольцо вокруг бура (POI.center): 4 прохода ≥ gate px (герой ~66, ближник ~54, зонд руления 105). */
+function layoutDefenseRing(opts) {
+	const {
+		left, right, top, bottom, gate = 280, tw = 48,
+	} = opts;
+	const cx = POI.center[0];
+	const cy = POI.center[1];
+	const half = gate / 2;
+	const topY2 = top + tw;
+	const midTop = cy - half;
+	const midBot = cy + half;
+	return [
+		// верх / низ
+		...mkWall(left, top, (cx - half) - left, tw),
+		...mkWall(cx + half, top, right - (cx + half), tw),
+		...mkWall(left, bottom, (cx - half) - left, tw),
+		...mkWall(cx + half, bottom, right - (cx + half), tw),
+		// лево / право (щели по центру по Y)
+		...mkWall(left, topY2, tw, midTop - topY2),
+		...mkWall(left, midBot, tw, bottom - midBot),
+		...mkWall(right - tw, topY2, tw, midTop - topY2),
+		...mkWall(right - tw, midBot, tw, bottom - midBot),
+	];
+}
 function layoutDefenseA() {
+	/* Просторное кольцо, проходы 280px */
 	return [
 		...layoutWorldBorderActions(),
-		...mkWall(1500, 700, 300, 48), ...mkWall(2100, 700, 300, 48),
-		...mkWall(1500, 1400, 300, 48), ...mkWall(2100, 1400, 300, 48),
-		...mkWall(1400, 800, 48, 250), ...mkWall(2450, 800, 48, 250),
-		...mkWall(1400, 1200, 48, 200), ...mkWall(2450, 1200, 48, 200),
+		...layoutDefenseRing({ left: 1480, right: 2360, top: 760, bottom: 1440, gate: 280 }),
 	];
 }
 function layoutDefenseB() {
-	/* Кольцо вокруг бура + внешние бастионы */
+	/* Кольцо + внешние бастионы; проходы 260px (раньше бок ~32 / верх ~80 — никто не лез) */
 	return [
 		...layoutWorldBorderActions(),
-		...mkWall(1620, 820, 280, 48), ...mkWall(1980, 820, 280, 48),
-		...mkWall(1620, 1280, 280, 48), ...mkWall(1980, 1280, 280, 48),
-		...mkWall(1580, 868, 48, 220), ...mkWall(2260, 868, 48, 220),
-		...mkWall(1580, 1120, 48, 160), ...mkWall(2260, 1120, 48, 160),
+		...layoutDefenseRing({ left: 1560, right: 2280, top: 800, bottom: 1400, gate: 260 }),
 		...mkWall(800, 400, 200, 48), ...mkWall(2800, 400, 200, 48),
 		...mkWall(800, 1700, 200, 48), ...mkWall(2800, 1700, 200, 48),
 		...mkWall(500, 900, 48, 300), ...mkWall(3300, 900, 48, 300),
 	];
 }
 function layoutEliteA() {
+	/* Короб вокруг элиты + дверной проём слева (~280px — герой ~66px) */
 	return [
 		...layoutWorldBorderActions(),
-		...mkWall(1400, 600, 48, 900), ...mkWall(2400, 600, 48, 900),
-		...mkWall(1500, 600, 900, 48), ...mkWall(1500, 1500, 900, 48),
+		...mkWall(1400, 600, 48, 260), ...mkWall(1400, 1140, 48, 360), // вход с запада
+		...mkWall(2400, 600, 48, 900),
+		...mkWall(1448, 600, 952, 48), ...mkWall(1448, 1500, 952, 48),
 		...mkWall(1700, 900, 200, 48), ...mkWall(2000, 1200, 200, 48),
 	];
 }
 function layoutEliteB() {
-	/* Восьмёрка / арена с колоннами */
+	/* Восьмёрка / арена с колоннами; проходы ≥200px */
 	return [
 		...layoutWorldBorderActions(),
-		...mkWall(1100, 500, 48, 400), ...mkWall(2700, 500, 48, 400),
-		...mkWall(1100, 1300, 48, 400), ...mkWall(2700, 1300, 48, 400),
-		...mkWall(1300, 900, 400, 48), ...mkWall(2200, 900, 400, 48),
-		...mkWall(1300, 1300, 400, 48), ...mkWall(2200, 1300, 400, 48),
+		...mkWall(1100, 500, 48, 320), ...mkWall(2700, 500, 48, 320),
+		...mkWall(1100, 1180, 48, 420), ...mkWall(2700, 1180, 48, 420),
+		...mkWall(1148, 900, 352, 48), ...mkWall(2340, 900, 360, 48),
+		...mkWall(1148, 1300, 352, 48), ...mkWall(2340, 1300, 360, 48),
 		...mkWall(1850, 700, 120, 120), ...mkWall(1850, 1300, 120, 120),
 	];
 }
@@ -786,11 +857,14 @@ function resizeGroundWorldActions() {
 layout("Menu", "Menu_ev", [
 	layer("Menu", [
 		textInst(Label, 0, 36, 1280, 60, "ЭХО-РЫЦАРЬ", { size: 36, align: "center", color: "#7ec8ff" }),
-		textInst(Label, 0, 96, 1280, 30, "Роглайк · большие локации · корабль-хаб · стелс · звёздная карта", { size: 13, align: "center", color: "#b0b8c8", bold: false }),
+		textInst(Label, 0, 90, 1280, 50, "Когда Эхо-врата раскололись, каждая битва оставила в мирах тень — Эхо. Ты — последний Эхо-рыцарь. Куй оружие через шесть миров и не дай эху стать громче тебя.", { size: 12, align: "center", color: "#b0b8c8", bold: false }),
 		...RELICS.map(([id, , desc], i) => spriteInst(RelicCard, 340 + i * 300, 320, { frame: i, vars: { RelicID: id, Desc: desc } })),
 		...RELICS.map(([, title], i) => textInst(Label, 340 + i * 300 - 120, 430, 240, 28, title, { size: 15, align: "center", color: "#ffffff" })),
-		textInst(InfoText, 160, 500, 960, 100, "", { size: 13, align: "center", color: "#e6e6e6", bold: false }),
-		textInst(Label, 0, 640, 1280, 40, "WASD · ЛКМ · Q · Shift стелс · T тихий удар · E/M/V/F · P пауза", { size: 11, align: "center", color: "#8a909c", bold: false }),
+		textInst(InfoText, 160, 500, 960, 40, "Наведи на реликвию — описание эффекта", { size: 13, align: "center", color: "#e6e6e6", bold: false }),
+		textInst(Label, 0, 560, 1280, 36, "Хаб между миссиями · F — узлы · V — планеты · цель миссии → возврат на корабль", {
+			size: 12, align: "center", color: "#9eb0c8", bold: false,
+		}),
+		textInst(Label, 0, 640, 1280, 40, "WASD — ходьба · ЛКМ — огонь · Пробел — рывок · Shift — стелс · T — тихий удар · Q — реликвия · E/M/V/F · P — пауза · R — меню", { size: 10, align: "center", color: "#8a909c", bold: false }),
 	], { bg: "#12141c" }),
 ]);
 
@@ -811,7 +885,7 @@ layout("Game", "Game_ev", [
 		// Шаблон за экраном: Archetype=3 чтобы случайно не блокировал зачистку комнаты
 		spriteInst(Enemy, -600, -600, {
 			anim: "melee",
-			vars: { HP: 1, MaxHP: 1, Damage: 0, Speed: 0, AtkCD: 99, Bounty: 0, IsBoss: 0, Archetype: 3, Agro: 0, Alert: 0, PathAng: 0 },
+			vars: { HP: 1, MaxHP: 1, Damage: 0, Speed: 0, AtkCD: 99, Bounty: 0, IsBoss: 0, IsElite: 0, Archetype: 3, Agro: 0, Alert: 0, PathAng: 0 },
 			behaviors: { Bullet: bulletProps(0, false) },
 		}),
 		spriteInst(HeroBullet, -600, -500, { anim: "normal", behaviors: { Bullet: bulletProps(620, true), DestroyOutsideLayout: { properties: { region: "layout" } } } }),
@@ -830,6 +904,7 @@ layout("Game", "Game_ev", [
 		spriteInst(EchoGate, -800, -800, { visible: false }),
 		textInst(GatePrompt, -800, -800, 320, 28, "V — звёздная карта", { size: 13, align: "center", color: "#a8d4ff", visible: false }),
 		spriteInst(FloorWeapon, -900, -900, { anim: "echo", visible: false }),
+		textInst(FloorHint, -900, -900, 220, 24, "", { size: 12, align: "center", color: "#ffe08a", visible: false }),
 		spriteInst(ModPickup, -900, -900, { anim: "m1", vars: { Kind: 1 }, behaviors: { Fade: fadeProps(12, 2) } }),
 		spriteInst(Fx, -300, -300, { w: 10, h: 10, behaviors: { Fade: fadeProps(0, 0.4) } }),
 		textInst(FloatText, -300, -200, 100, 24, "0", { size: 12, behaviors: { Bullet: bulletProps(50, false), Fade: fadeProps(0.2, 0.5) } }),
@@ -857,25 +932,29 @@ layout("Game", "Game_ev", [
 		spriteInst(HPBar, 490, 680, { w: 300, h: 18 }),
 		// Окно магазина-кузницы + кликабельные кнопки
 		spriteInst(ForgeDim, 0, 0, { w: 1280, h: 720, visible: false }),
-		spriteInst(ForgeWindow, 360, 50, { w: 560, h: 440, visible: false }),
-		textInst(ForgeTitle, 360, 62, 560, 40, "КУЗНИЦА ЭХА", { size: 24, align: "center", color: "#ffe9a0", visible: false }),
-		textInst(ForgeWallet, 380, 114, 520, 28, "", { size: 14, align: "center", color: "#d0e8ff", visible: false }),
-		textInst(ForgeSec, 380, 148, 280, 20, "СТИХИЯ на эхо-клинок (1 ядро)", { size: 11, align: "left", color: "#e0c060", visible: false }),
-		textInst(ForgeSec, 380, 278, 360, 20, "КОВКА → слот 1 (старое: 1→2, 2→пол)", { size: 11, align: "left", color: "#8ec8ff", visible: false }),
+		spriteInst(ForgeWindow, 360, 30, { w: 560, h: 560, visible: false }),
+		textInst(ForgeTitle, 360, 40, 560, 36, "КУЗНИЦА ЭХА", { size: 22, align: "center", color: "#ffe9a0", visible: false }),
+		textInst(ForgeWallet, 380, 82, 520, 28, "", { size: 13, align: "center", color: "#d0e8ff", visible: false }),
+		textInst(ForgeSec, 380, 112, 400, 18, "СТИХИЯ на эхо (1 ядро) · 1–3", { size: 11, align: "left", color: "#e0c060", visible: false }),
+		textInst(ForgeSec, 380, 230, 440, 18, "ЗОЛОТО · 4–6", { size: 11, align: "left", color: "#e0c060", visible: false }),
+		textInst(ForgeSec, 380, 360, 440, 18, "КОВКА → слот 2 · слот 1 = эхо (мышь 7–9)", { size: 11, align: "left", color: "#8ec8ff", visible: false }),
 		...[
-			[1, "ОГОНЬ на эхо-клинок — DoT", 172],
-			[2, "ЛЁД на эхо-клинок — slow", 208],
-			[3, "МОЛНИЯ на эхо-клинок — цепь", 244],
-			[4, "Сковать Клинок пепла", 302],
-			[5, "Сковать Клинок инея", 338],
-			[6, "Сковать Клинок грозы", 374],
+			[1, "Огонь — поджигает врагов", 132],
+			[2, "Лёд — замедляет рядом", 164],
+			[3, "Молния — удар цепью", 196],
+			[4, "Заплатка: +30 HP · 45з", 254],
+			[5, "Закалка: +3 урона · от 70з", 286],
+			[6, "Усиление: +20 макс.HP · от 90з", 318],
+			[7, "Сковать Клинок пепла · 2 огня", 384],
+			[8, "Сковать Клинок инея · 2 льда", 416],
+			[9, "Сковать Клинок грозы · 2 молнии", 448],
 		].flatMap(([slot, label, y]) => [
-			textInst(ForgeRow, 390, y + 4, 400, 24, label, { size: 14, align: "left", color: "#f5ecd0", visible: false, vars: { Slot: slot } }),
-			spriteInst(ForgeBtn, 808, y + 2, { w: 96, h: 28, anim: "deny", visible: false, vars: { Slot: slot } }),
-			textInst(ForgeBtnLabel, 808, y + 4, 96, 24, "—", { size: 12, align: "center", color: "#ffffff", visible: false, vars: { Slot: slot } }),
+			textInst(ForgeRow, 390, y + 2, 400, 22, label, { size: 13, align: "left", color: "#f5ecd0", visible: false, vars: { Slot: slot } }),
+			spriteInst(ForgeBtn, 808, y, { w: 96, h: 26, anim: "deny", visible: false, vars: { Slot: slot } }),
+			textInst(ForgeBtnLabel, 808, y + 2, 96, 22, "—", { size: 11, align: "center", color: "#ffffff", visible: false, vars: { Slot: slot } }),
 		]),
-		textInst(ForgeHint, 380, 448, 520, 28, "M у автомата — моды · G — пол · Esc/X закрыть", { size: 11, align: "center", color: "#9eb0c8", bold: false, visible: false }),
-		spriteInst(ForgeClose, 868, 58, { w: 44, h: 44, visible: false }),
+		textInst(ForgeHint, 380, 520, 520, 28, "1–6 клавиши · 7–9 ковка мышью · X закрыть", { size: 11, align: "center", color: "#9eb0c8", bold: false, visible: false }),
+		spriteInst(ForgeClose, 868, 36, { w: 44, h: 44, visible: false }),
 		// Автомат модов (Warframe-lite: вес + ёмкость)
 		spriteInst(ModWindow, 360, 40, { w: 560, h: 500, visible: false }),
 		textInst(ModTitle, 360, 52, 560, 36, "АВТОМАТ МОДОВ", { size: 22, align: "center", color: "#9ed0ff", visible: false }),
@@ -997,8 +1076,9 @@ const modInfoText =
 	`"Пушка в руке: " & HandGunName & "   ёмкость: " & HandCap & "/" & ${GUN_MOD_CAP} & newline` +
 	`& "Инвентарь ∞: Ост " & InvM1 & " · Скор " & InvM2 & " · Вамп " & InvM3 & " · Кал " & InvM4 & " · Искра " & InvM5`;
 /** HUD: короткие выражения на уже синхронизированных переменных. */
+const HUB_INTERACT = 140;
 const hudPlanetText =
-	`"Планета: " & LayerName & " · узел " & Mission & "/" & PlanetNodes & " · мир " & Layer & "/" & MaxLayer`;
+	`"Планета: " & LayerName & " · узел " & Mission & "/" & PlanetNodes & " · мир " & Layer & "/${PLANET_COUNT}"`;
 const hudCombatText =
 	`"Тип: " & MissionTypeName & " · ур.врагов " & (${enemyLevel}) & " · убито " & Kills`;
 const hudWalletText =
@@ -1214,6 +1294,8 @@ const forgeClearNpc = [
 	A("ModBench", "set-visible", { visibility: "invisible" }),
 	A("ModPrompt", "set-position", { x: "-800", y: "-800" }),
 	A("ModPrompt", "set-visible", { visibility: "invisible" }),
+	A("FloorHint", "set-position", { x: "-900", y: "-900" }),
+	A("FloorHint", "set-visible", { visibility: "invisible" }),
 	...modHide,
 	...starUiHide,
 	...missionMapUiHide,
@@ -1223,42 +1305,34 @@ const starInfoText =
 	`& "Сейчас: " & LayerName & " · миссия " & Mission & "/" & PlanetNodes & ` +
 	`" · миров " & MaxLayer & "/${PLANET_COUNT}"`;
 
-/** arch: 0 shooter · 1 melee · 2 sniper · 3 wolf · 4 heavy · 5 drone · 6 swarm · 7 ancient */
-const spawnEnemyActions = (x, y, arch) => {
-	const hp =
-		arch === 4 ? `55 + (${enemyLevel}) * 14`
-			: arch === 7 ? `48 + (${enemyLevel}) * 12`
-				: arch === 2 ? `38 + (${enemyLevel}) * 10`
-					: arch === 3 ? `22 + (${enemyLevel}) * 6`
-						: arch === 6 ? `12 + (${enemyLevel}) * 4`
-							: arch === 5 ? `14 + (${enemyLevel}) * 5`
-								: arch === 0 ? `16 + (${enemyLevel}) * 5`
-									: `24 + (${enemyLevel}) * 7`;
-	const dmg =
-		arch === 4 ? `12 + (${enemyLevel}) * 2`
-			: arch === 7 ? `11 + (${enemyLevel}) * 2`
-				: arch === 2 ? `10 + (${enemyLevel}) * 2`
-					: arch === 6 ? `6 + ${enemyLevel}`
-						: arch === 0 || arch === 5 ? `7 + ${enemyLevel}`
-							: arch === 3 ? `9 + ${enemyLevel}`
-								: `8 + ${enemyLevel}`;
-	const spd =
-		arch === 6 ? `155 + Layer * 10`
-			: arch === 5 ? `120 + Layer * 7`
-				: arch === 3 ? `130 + Layer * 8`
-					: arch === 0 ? `95 + Layer * 5`
-						: arch === 4 ? `42 + Layer * 2`
-							: arch === 7 ? `48 + Layer * 2`
-								: arch === 2 ? `55 + Layer * 3`
-									: `70 + Layer * 4`;
-	const bounty =
-		arch === 7 ? `18 + RoomsDone + Layer * 4`
-			: arch === 4 ? `14 + RoomsDone + Layer * 3`
-				: arch === 3 ? `12 + RoomsDone + Layer * 3`
-					: `6 + RoomsDone + Layer * 2`;
+/** arch: 0 shooter · 1 melee · 2 sniper · 3 wolf · 4 heavy · 5 drone · 6 swarm · 7 ancient
+ *  ECH-8: база slime (HP 20+5×RD, урон 8+0.5×EL, spd 65, gold 2+Floor(RD/10)) × множители архетипа.
+ *  opts.bat — адд босса: база bat (14+4×RD, 6+0.4×EL, 110, 3+Floor(RD/10)). */
+const ARCH_MULT = {
+	0: { hp: 1, dmg: 1, spd: 0.9, gold: 1, cd: 1.4 },
+	1: { hp: 1.5, dmg: 1.3, spd: 1.3, gold: 1.2, cd: 0.9 },
+	2: { hp: 0.7, dmg: 2, spd: 0.7, gold: 1.5, cd: 2.8 },
+	3: { hp: 1.8, dmg: 1.2, spd: 1.9, gold: 0.5, cd: 0.8 },
+	4: { hp: 3, dmg: 1.6, spd: 0.55, gold: 2, cd: 1.8 },
+	5: { hp: 0.6, dmg: 0.7, spd: 1.6, gold: 1, cd: 0.7 },
+	6: { hp: 0.4, dmg: 0.5, spd: 1.7, gold: 0.5, cd: 0.8 },
+	7: { hp: 2.5, dmg: 0.6, spd: 0.6, gold: 2.5, cd: 2.0 },
+};
+const spawnEnemyActions = (x, y, arch, opts = {}) => {
+	const m = ARCH_MULT[arch] || ARCH_MULT[0];
+	const bat = !!opts.bat;
+	const hpBase = bat ? `(14 + RoomsDone * 4)` : `(20 + RoomsDone * 5)`;
+	const dmgBase = bat ? `(6 + (${enemyLevel}) * 0.4)` : `(8 + (${enemyLevel}) * 0.5)`;
+	const spdBase = bat ? `110` : `65`;
+	const goldBase = bat ? `(3 + Floor(RoomsDone / 10))` : `(2 + Floor(RoomsDone / 10))`;
+	const hp = `${hpBase} * ${m.hp}`;
+	const dmg = `${dmgBase} * ${m.dmg}`;
+	const spd = `${spdBase} * ${m.spd}`;
+	const bounty = `Floor(${goldBase} * ${m.gold})`;
 	const actions = [
 		create("Enemy", "Game", x, y),
 		setIv("Enemy", "IsBoss", 0),
+		setIv("Enemy", "IsElite", 0),
 		setIv("Enemy", "Archetype", arch),
 		setIv("Enemy", "Agro", arch === 3 ? 0 : 1),
 		A("Enemy", "set-animation", { animation: archAnimExpr(arch), from: "beginning" }),
@@ -1267,11 +1341,10 @@ const spawnEnemyActions = (x, y, arch) => {
 		setIv("Enemy", "Damage", dmg),
 		setIv("Enemy", "Speed", spd),
 		setIv("Enemy", "Bounty", bounty),
-		setIv("Enemy", "AtkCD", "random(0.4, 1.2)"),
-		setIv("Enemy", "Alert", 0),
+		setIv("Enemy", "AtkCD", String(m.cd)),
+		setIv("Enemy", "Alert", opts.alert != null ? opts.alert : 0),
 		setIv("Enemy", "PathAng", `angle(${x}, ${y}, AiTX, AiTY)`),
 	];
-	// волки не считаются для зачистки комнаты
 	if (arch !== 3) actions.push(addVar("EnemiesAlive", 1));
 	return actions;
 };
@@ -1359,6 +1432,8 @@ sheet("Game_ev", [
 	Var("SteerTgtY", "number", 0),
 	Var("HostageOK", "number", 0),
 	Var("DashCD", "number", 0),
+	Var("Paused", "number", 0),
+	Var("UiClickLock", "number", 0),
 	Var("IFrames", "number", 0),
 	Var("Shield", "number", 0),
 	Var("RelicCD", "number", 0),
@@ -1374,6 +1449,7 @@ sheet("Game_ev", [
 	Var("HitUID", "number", 0),
 	Var("ChainTargetUID", "number", 0),
 	Var("ChainLock", "number", 0),
+	Var("NodeWasLast", "number", 0),
 	Var("Layer", "number", 1),
 	Var("PlanetNodes", "number", 9),
 	Var("LayerName", "string", "Лес Эха"),
@@ -1398,6 +1474,11 @@ sheet("Game_ev", [
 	Var("ModBonusDmg", "number", 0),
 	Var("HasLifeMod", "number", 0),
 	Var("HasSpeedMod", "number", 0),
+	Var("BuyDmgN", "number", 0),
+	Var("BuyMaxHpN", "number", 0),
+	Var("SilentCD", "number", 0),
+	Var("ForgeDmgCost", "number", 70),
+	Var("ForgeMaxHpCost", "number", 90),
 	Var("BulletDmg", "number", 12),
 	Var("ModNameA", "string", "—"),
 	Var("ModNameB", "string", "—"),
@@ -1423,11 +1504,13 @@ sheet("Game_ev", [
 		A("EnemyBullet", "destroy"), A("ModPickup", "destroy"), A("WolfDen", "destroy"), A("RoomProp", "destroy"),
 		A("SpyTerminal", "destroy"), A("Hostage", "destroy"), A("ExtractZone", "destroy"),
 		...miniClearAll,
-		setVar("Gold", 0), setVar("Layer", 1), setVar("MaxLayer", 1), setVar("Mission", 1), setVar("MissionType", 0),
+		setVar("Gold", 80), setVar("Layer", 1), setVar("MaxLayer", 1), setVar("Mission", 1), setVar("MissionType", 0),
 		setVar("MissionL1", 1), setVar("MissionL2", 1), setVar("MissionL3", 1),
 		setVar("MissionL4", 1), setVar("MissionL5", 1), setVar("MissionL6", 1),
 		setVar("RoomsDone", 0), setVar("Kills", 0),
-		setVar("CoreFire", 99), setVar("CoreIce", 99), setVar("CoreShock", 99), setVar("Element", 0), setVar("EchoElement", 0),
+		setVar("CoreFire", 2), setVar("CoreIce", 2), setVar("CoreShock", 2), setVar("Element", 0), setVar("EchoElement", 0),
+		setVar("BuyDmgN", 0), setVar("BuyMaxHpN", 0), setVar("SilentCD", 0),
+		setVar("ForgeDmgCost", FORGE_DMG_COST_BASE), setVar("ForgeMaxHpCost", FORGE_MAXHP_COST_BASE),
 		setVar("Gun1", 0), setVar("Gun2", -1), setVar("FloorGun", -1),
 		setVar("FloorX", 0), setVar("FloorY", 0), setVar("Hand", 1), setVar("TempGun", 0),
 		setVar("Gun1ModA", -1), setVar("Gun1ModB", -1), setVar("Gun1ModC", -1), setVar("Gun1ModD", -1),
@@ -1441,7 +1524,7 @@ sheet("Game_ev", [
 		setVar("ObjectiveX", 640), setVar("ObjectiveY", 400),
 		setVar("Stealth", 0), setVar("SpyProgress", 0), setVar("Alarm", 0), setVar("HostageOK", 0),
 		setVar("ObjectiveDone", 0), setVar("SpawnReady", 0),
-		setVar("DashCD", 0), setVar("IFrames", 1.2), setVar("Shield", 0), setVar("RelicCD", 0),
+		setVar("DashCD", 0), setVar("Paused", 0), setVar("IFrames", 1.2), setVar("Shield", 0), setVar("RelicCD", 0),
 		setVar("GameOver", 0), setVar("Won", 0), setVar("BossAlive", 0), setVar("BossPhase", 0),
 		setVar("ChainX", 0), setVar("ChainY", 0), setVar("AuraX", 0), setVar("AuraY", 0),
 		setVar("HitUID", 0), setVar("ChainTargetUID", 0), setVar("ChainLock", 0),
@@ -1462,11 +1545,12 @@ sheet("Game_ev", [
 		subIv("Hero", "AtkCD", "dt"),
 		subIv("Enemy", "AtkCD", "dt"),
 		setVar("DashCD", "max(0, DashCD - dt)"),
+		setVar("SilentCD", "max(0, SilentCD - dt)"),
 		setVar("IFrames", "max(0, IFrames - dt)"),
 		setVar("Shield", "max(0, Shield - dt)"),
 		setVar("RelicCD", "max(0, RelicCD - dt)"),
+		setVar("UiClickLock", 0),
 		Call("SyncCombatMeta"),
-		A("Hero", "set-angle-toward-position", { x: "Mouse.X", y: "Mouse.Y" }),
 		A("Fx", "set-size", { width: "Self.Width + 700 * dt", height: "Self.Height + 700 * dt" }),
 		A("HPBar", "set-width", { width: "300 * max(0, Hero.HP) / Hero.MaxHP" }),
 		A("HudPlanet", "set-text", { text: hudPlanetText }),
@@ -1477,32 +1561,56 @@ sheet("Game_ev", [
 		A("HudStatus", "set-text", { text: hudStatusText }),
 		Call("RefreshObjective"),
 	], [
-		E([varIs("Stealth", "=", 1)], [
-			A("Hero", "set-opacity", { opacity: "55" }),
-			A("Hero", "set-max-speed", { "max-speed": "110" }, "EightDir"),
+		E([varIs("Paused", "=", 0), varIs("GameOver", "=", 0)], [
+			A("Hero", "set-angle-toward-position", { x: "Mouse.X", y: "Mouse.Y" }),
 		]),
-		E([varIs("Stealth", "=", 0), varIs("Shield", ">", 0)], [
+		E([varIs("Stealth", "=", 1), varIs("HostageOK", "=", 0)], [
+			A("Hero", "set-opacity", { opacity: "55" }),
+			A("Hero", "set-max-speed", { "max-speed": String(STEALTH_SPEED) }, "EightDir"),
+		]),
+		E([varIs("Stealth", "=", 1), varIs("HostageOK", "=", 1)], [
+			A("Hero", "set-opacity", { opacity: "55" }),
+			A("Hero", "set-max-speed", { "max-speed": String(Math.round(STEALTH_SPEED * 0.85)) }, "EightDir"),
+		]),
+		E([varIs("Stealth", "=", 0), varIs("HostageOK", "=", 1)], [
+			A("Hero", "set-opacity", { opacity: "100" }),
+			A("Hero", "set-max-speed", { "max-speed": "221" }, "EightDir"), // 260*0.85
+		]),
+		E([varIs("Stealth", "=", 0), varIs("Shield", ">", 0), varIs("HostageOK", "=", 0)], [
 			A("Hero", "set-opacity", { opacity: "70 + 30 * sin(time * 600)" }),
 			A("Hero", "set-max-speed", { "max-speed": "260" }, "EightDir"),
 		]),
-		E([varIs("Stealth", "=", 0), varIs("Shield", "<=", 0)], [
+		E([varIs("Stealth", "=", 0), varIs("Shield", "<=", 0), varIs("HostageOK", "=", 0)], [
 			A("Hero", "set-opacity", { opacity: "100" }),
 			A("Hero", "set-max-speed", { "max-speed": "260" }, "EightDir"),
 		]),
-		E([varIs("HasSpeedMod", "=", 1)], [setIv("Hero", "AtkRate", "0.16")]),
-		E([varIs("HasSpeedMod", "=", 0), varIs("ActiveGun", "=", 3)], [setIv("Hero", "AtkRate", "0.18")]),
-		E([varIs("HasSpeedMod", "=", 0), cmp2("ActiveGun", "!=", "3"), varIs("Element", "=", 3)], [setIv("Hero", "AtkRate", "0.22")]),
-		E([varIs("HasSpeedMod", "=", 0), cmp2("ActiveGun", "!=", "3"), cmp2("Element", "!=", "3")], [setIv("Hero", "AtkRate", "0.35")]),
+		// База 0.35; молния ×0.83; мод Скорострел ×0.87 (ECH-8)
+		E([], [setIv("Hero", "AtkRate", "0.35")]),
+		E([varIs("ActiveGun", "=", 3)], [setIv("Hero", "AtkRate", "Hero.AtkRate * 0.83")]),
+		E([cmp2("ActiveGun", "!=", "3"), varIs("Element", "=", 3)], [setIv("Hero", "AtkRate", "Hero.AtkRate * 0.83")]),
+		E([varIs("HasSpeedMod", "=", 1)], [setIv("Hero", "AtkRate", "Hero.AtkRate * 0.87")]),
 		// Спрайт врага НЕ крутим — только угол движения Bullet (PathAng = рулевой pathfinding)
 		E([forEach("Enemy")], [A("Enemy", "set-angle", { angle: "0" })]),
-		// Пока не видят — стоят (кроме обороны бура)
+		// Шпионаж: пока не видят — стоят (стелс-миссия)
 		E([
 			forEach("Enemy"),
 			ivIs("Enemy", "Alert", "=", 0),
-			cmp2("MissionType", "!=", "2"),
+			varIs("MissionType", "=", 5),
 		], [
 			A("Enemy", "set-speed", { speed: "0" }, "Bullet"),
 		]),
+		// Патруль (зачистка / волны / адды элиты / спасение): бродят до обнаружения
+		...[0, 1, 3, 6].map((mt) =>
+			E([
+				forEach("Enemy"),
+				ivIs("Enemy", "Alert", "=", 0),
+				varIs("MissionType", "=", mt),
+				ivIs("Enemy", "IsBoss", "=", 0),
+				varIs("GameOver", "=", 0),
+			], [
+				A("Enemy", "set-angle-of-motion", { angle: "Self.PathAng" }, "Bullet"),
+				A("Enemy", "set-speed", { speed: "Self.Speed * 0.4" }, "Bullet"),
+			])),
 		// Melee / swarm / ancient / boss / agro wolf — по PathAng
 		...meleeMoveEvents(),
 		// Wolf passive — стоит
@@ -1686,20 +1794,57 @@ sheet("Game_ev", [
 		varIs("InForge", "=", 0), varIs("InMods", "=", 0),
 	], [Call("UpdateEnemyPaths")]),
 
-	Comment("Стелс: Shift удержать · T тихий удар"),
+	Comment("Стелс: Shift удержать · T тихий удар (только по незаагренным, ближайший в радиусе)"),
 	E([sys("every-tick"), varIs("InMission", "=", 1)], [setVar("Stealth", 0)]),
 	E([sys("every-tick"), keyDown(KEY.SHIFT), varIs("InMission", "=", 1), varIs("GameOver", "=", 0)], [setVar("Stealth", 1)]),
 	E([sys("every-tick"), varIs("InHub", "=", 1)], [setVar("Stealth", 0)]),
+	// Смена курса патруля
 	E([
-		key(KEY.T), varIs("InMission", "=", 1), varIs("Stealth", "=", 1), varIs("GameOver", "=", 0),
-		C("Enemy", "pick-nearestfurthest", { which: "nearest", x: "Hero.X", y: "Hero.Y", z: "0", "pick-all-tied": false }),
-		cmp2("distance(Hero.X, Hero.Y, Enemy.X, Enemy.Y)", "<=", "55"),
-		ivIs("Enemy", "Alert", "=", 0),
-		ivIs("Enemy", "IsBoss", "=", 0),
+		everySec(1.6), varIs("InMission", "=", 1), varIs("GameOver", "=", 0),
+		forEach("Enemy"), ivIs("Enemy", "Alert", "=", 0), ivIs("Enemy", "IsBoss", "=", 0),
+		cmp2("(MissionType = 5 ? 0 : (MissionType = 2 ? 0 : 1))", "=", "1"),
 	], [
-		Call("DamageEnemy", "Enemy.UID", "9999"),
-		...msg(100, q("Тихий удар!"), "rgbEx(60, 120, 80)"),
-		...fx("Enemy.X", "Enemy.Y", 60, "rgbEx(40, 100, 60)"),
+		setIv("Enemy", "PathAng", "Self.PathAng + choose(-60, -35, 35, 60)"),
+	]),
+	E([
+		key(KEY.T), keyDown(KEY.SHIFT),
+		varIs("InMission", "=", 1), varIs("GameOver", "=", 0), varIs("Paused", "=", 0),
+		cmp2("SilentCD", ">", "0"),
+	], [...msg(80, `"Тихий удар КД " & ceil(SilentCD) & "с"`, "rgbEx(100, 80, 40)")]),
+	E([
+		key(KEY.T), keyDown(KEY.SHIFT),
+		varIs("InMission", "=", 1), varIs("GameOver", "=", 0), varIs("Paused", "=", 0),
+		cmp2("SilentCD", "<=", "0"),
+	], [
+		setVar("HitUID", -1),
+		setVar("SteerBest", 9999),
+	], [
+		E([
+			forEach("Enemy"),
+			ivIs("Enemy", "Alert", "=", 0),
+			ivIs("Enemy", "IsBoss", "=", 0),
+			cmp2("distance(Hero.X, Hero.Y, Enemy.X, Enemy.Y)", "<=", String(SILENT_STRIKE_RANGE)),
+			cmp2("distance(Hero.X, Hero.Y, Enemy.X, Enemy.Y)", "<", "SteerBest"),
+		], [
+			setVar("SteerBest", "distance(Hero.X, Hero.Y, Enemy.X, Enemy.Y)"),
+			setVar("HitUID", "Enemy.UID"),
+		]),
+		E([cmp2("HitUID", ">=", "0")], [
+			setVar("SilentCD", SILENT_STRIKE_CD),
+		], [
+			E([C("Enemy", "pick-by-unique-id", { "unique-id": "HitUID" }), ivIs("Enemy", "IsElite", "=", 1)], [
+				Call("DamageEnemy", "HitUID", `Floor(Enemy.MaxHP * ${SILENT_STRIKE_ELITE_FRAC})`),
+				...msg(100, q("Тихий удар по элите (−35% HP)"), "rgbEx(100, 120, 60)"),
+			]),
+			E([C("Enemy", "pick-by-unique-id", { "unique-id": "HitUID" }), ivIs("Enemy", "IsElite", "=", 0)], [
+				Call("DamageEnemy", "HitUID", "9999"),
+				...msg(100, q("Тихий удар!"), "rgbEx(60, 120, 80)"),
+			]),
+			E([], [...fx("Hero.X", "Hero.Y", 60, "rgbEx(40, 100, 60)")]),
+		]),
+		E([cmp2("HitUID", "<", "0")], [
+			...msg(90, q("Тихий удар: подойди ближе к незаметившему врагу (Shift+T)"), "rgbEx(100, 80, 40)"),
+		]),
 	]),
 
 	Comment("Стрелки / дроны / тяжёлые / снайперы (цель: герой или бур; стрельба только после обнаружения / на обороне)"),
@@ -1827,14 +1972,16 @@ sheet("Game_ev", [
 		]),
 	]),
 
-	Comment("Движение WASD (стрелки тоже работают)"),
-	E([keyDown(KEY.W), keyDown(KEY.UP)], [simMove("up")], null, { or: true }),
-	E([keyDown(KEY.S), keyDown(KEY.DOWN)], [simMove("down")], null, { or: true }),
-	E([keyDown(KEY.A), keyDown(KEY.LEFT)], [simMove("left")], null, { or: true }),
-	E([keyDown(KEY.D), keyDown(KEY.RIGHT)], [simMove("right")], null, { or: true }),
+	Comment("Движение WASD (стрелки тоже работают; на паузе — нет)"),
+	E([varIs("Paused", "=", 0), varIs("GameOver", "=", 0)], [], [
+		E([keyDown(KEY.W), keyDown(KEY.UP)], [simMove("up")], null, { or: true }),
+		E([keyDown(KEY.S), keyDown(KEY.DOWN)], [simMove("down")], null, { or: true }),
+		E([keyDown(KEY.A), keyDown(KEY.LEFT)], [simMove("left")], null, { or: true }),
+		E([keyDown(KEY.D), keyDown(KEY.RIGHT)], [simMove("right")], null, { or: true }),
+	]),
 
 	Comment("Стрельба"),
-	E([C("Mouse", "on-click", { "mouse-button": "left", "click-type": "clicked" }), ivIs("Hero", "AtkCD", "<=", 0), varIs("GameOver", "=", 0), varIs("InForge", "=", 0), varIs("InMods", "=", 0), varIs("InStarMap", "=", 0), varIs("InMissionMap", "=", 0)], [
+	E([C("Mouse", "on-click", { "mouse-button": "left", "click-type": "clicked" }), ivIs("Hero", "AtkCD", "<=", 0), varIs("GameOver", "=", 0), varIs("Paused", "=", 0), varIs("InForge", "=", 0), varIs("InMods", "=", 0), varIs("InStarMap", "=", 0), varIs("InMissionMap", "=", 0)], [
 		setIv("Hero", "AtkCD", "Hero.AtkRate"),
 		A("Hero", "spawn-another-object", { object: "HeroBullet", layer: q("Game"), "image-point": "0", "create-hierarchy": false, "template-name": q("") }),
 		A("HeroBullet", "set-animation", { animation: "ElemAnim", from: "beginning" }),
@@ -1872,28 +2019,27 @@ sheet("Game_ev", [
 				E([ivIs("Enemy", "Archetype", "!=", 3)], [addVar("EnemiesAlive", "-1")]),
 				// мод «Вампир»: хил с убийства
 				E([varIs("HasLifeMod", "=", 1)], [
-					setIv("Hero", "HP", "min(Hero.MaxHP, Hero.HP + 3)"),
-					...floatText("Hero.X", "Hero.Y - 40", q("+3"), "rgbEx(30, 100, 40)"),
+					setIv("Hero", "HP", `min(Hero.MaxHP, Hero.HP + ${VAMP_HEAL})`),
+					...floatText("Hero.X", "Hero.Y - 40", q(`+${VAMP_HEAL}`), "rgbEx(30, 100, 40)"),
 				]),
-				// ~22% ядро (не с волков)
-				E([ivIs("Enemy", "IsBoss", "=", 0), ivIs("Enemy", "Archetype", "!=", 3), cmp2("random(0, 1)", "<", "0.22")], [
+				// ECH-8: ядро 4%, мод 3%, волки 35%; элита — гарант. ядро
+				E([ivIs("Enemy", "IsElite", "=", 1)], [
 					create("Core", "Game", "Enemy.X", "Enemy.Y"),
 					setIv("Core", "Kind", "choose(1, 2, 3)"),
 					A("Core", "set-animation", { animation: `(Self.Kind = 1 ? "fire" : (Self.Kind = 2 ? "ice" : "shock"))`, from: "beginning" }),
 				]),
-				// моды: обычные ~10%, волки ~35% (опциональный фарм)
-				E([ivIs("Enemy", "IsBoss", "=", 0), ivIs("Enemy", "Archetype", "!=", 3), cmp2("random(0, 1)", "<", "0.10")], [
+				E([ivIs("Enemy", "IsBoss", "=", 0), ivIs("Enemy", "IsElite", "=", 0), ivIs("Enemy", "Archetype", "!=", 3), cmp2("random(0, 1)", "<", String(DROP_CORE))], [
+					create("Core", "Game", "Enemy.X", "Enemy.Y"),
+					setIv("Core", "Kind", "choose(1, 2, 3)"),
+					A("Core", "set-animation", { animation: `(Self.Kind = 1 ? "fire" : (Self.Kind = 2 ? "ice" : "shock"))`, from: "beginning" }),
+				]),
+				E([ivIs("Enemy", "IsBoss", "=", 0), ivIs("Enemy", "IsElite", "=", 0), ivIs("Enemy", "Archetype", "!=", 3), cmp2("random(0, 1)", "<", String(DROP_MOD))], [
 					create("ModPickup", "Game", "Enemy.X + 18", "Enemy.Y - 10"),
 					setIv("ModPickup", "Kind", "choose(1, 2, 3, 4, 5)"),
 					A("ModPickup", "set-animation", { animation: `"m" & Self.Kind`, from: "beginning" }),
 				]),
-				E([ivIs("Enemy", "Archetype", "=", 3), cmp2("random(0, 1)", "<", "0.35")], [
+				E([ivIs("Enemy", "Archetype", "=", 3), cmp2("random(0, 1)", "<", String(DROP_MOD_WOLF))], [
 					create("ModPickup", "Game", "Enemy.X + 18", "Enemy.Y - 10"),
-					setIv("ModPickup", "Kind", "choose(1, 2, 3, 4, 5)"),
-					A("ModPickup", "set-animation", { animation: `"m" & Self.Kind`, from: "beginning" }),
-				]),
-				E([ivIs("Enemy", "IsBoss", "=", 1)], [
-					create("ModPickup", "Game", "Enemy.X + 20", "Enemy.Y"),
 					setIv("ModPickup", "Kind", "choose(1, 2, 3, 4, 5)"),
 					A("ModPickup", "set-animation", { animation: `"m" & Self.Kind`, from: "beginning" }),
 				]),
@@ -2081,32 +2227,44 @@ sheet("Game_ev", [
 		A("ModPrompt", "set-visible", { visibility: "visible" }),
 		A("GatePrompt", "set-visible", { visibility: "visible" }),
 	]),
-	E([key(KEY.M), varIs("GameOver", "=", 0), varIs("InForge", "=", 0), varIs("InMods", "=", 0), varIs("InStarMap", "=", 0), varIs("InMissionMap", "=", 0), varIs("InHub", "=", 1), cmp2("distance(Hero.X, Hero.Y, ModBench.X, ModBench.Y)", "<", "140")], [
-		Call("OpenMods"),
-	]),
-	E([C("Mouse", "on-object-clicked", { "mouse-button": "left", "click-type": "clicked", "object-clicked": "ModBench" }), varIs("GameOver", "=", 0), varIs("InForge", "=", 0), varIs("InMods", "=", 0), varIs("InStarMap", "=", 0), varIs("InMissionMap", "=", 0), varIs("InHub", "=", 1)], [
-		Call("OpenMods"),
-	]),
+	E([
+		key(KEY.M), varIs("GameOver", "=", 0), varIs("InForge", "=", 0), varIs("InMods", "=", 0), varIs("InStarMap", "=", 0), varIs("InMissionMap", "=", 0), varIs("InHub", "=", 1),
+		cmp2("distance(Hero.X, Hero.Y, ModBench.X, ModBench.Y)", ">=", String(HUB_INTERACT)),
+	], [...msg(90, q("Подойди ближе к автомату модов"), "rgbEx(100, 70, 40)")]),
+	E([
+		key(KEY.M), varIs("GameOver", "=", 0), varIs("InForge", "=", 0), varIs("InMods", "=", 0), varIs("InStarMap", "=", 0), varIs("InMissionMap", "=", 0), varIs("InHub", "=", 1),
+		cmp2("distance(Hero.X, Hero.Y, ModBench.X, ModBench.Y)", "<", String(HUB_INTERACT)),
+	], [Call("OpenMods")]),
+	E([
+		C("Mouse", "on-object-clicked", { "mouse-button": "left", "click-type": "clicked", "object-clicked": "ModBench" }),
+		varIs("GameOver", "=", 0), varIs("InForge", "=", 0), varIs("InMods", "=", 0), varIs("InStarMap", "=", 0), varIs("InMissionMap", "=", 0), varIs("InHub", "=", 1),
+		cmp2("distance(Hero.X, Hero.Y, ModBench.X, ModBench.Y)", ">=", String(HUB_INTERACT)),
+	], [...msg(90, q("Подойди ближе к автомату модов"), "rgbEx(100, 70, 40)")]),
+	E([
+		C("Mouse", "on-object-clicked", { "mouse-button": "left", "click-type": "clicked", "object-clicked": "ModBench" }),
+		varIs("GameOver", "=", 0), varIs("InForge", "=", 0), varIs("InMods", "=", 0), varIs("InStarMap", "=", 0), varIs("InMissionMap", "=", 0), varIs("InHub", "=", 1),
+		cmp2("distance(Hero.X, Hero.Y, ModBench.X, ModBench.Y)", "<", String(HUB_INTERACT)),
+	], [Call("OpenMods")]),
 	E([key(KEY.X), varIs("InMods", "=", 1)], [Call("CloseMods")]),
 	E([C("Mouse", "on-object-clicked", { "mouse-button": "left", "click-type": "clicked", "object-clicked": "ModClose" }), varIs("InMods", "=", 1)], [
 		Call("CloseMods"),
 	]),
+	// Только ModBtn (+ строка слева); Label на кнопке не слушаем — иначе двойной клик.
 	E([C("Mouse", "on-object-clicked", { "mouse-button": "left", "click-type": "clicked", "object-clicked": "ModBtn" }), varIs("InMods", "=", 1)], [
 		Call("ModBtnClick", "ModBtn.Slot"),
-	]),
-	E([C("Mouse", "on-object-clicked", { "mouse-button": "left", "click-type": "clicked", "object-clicked": "ModBtnLabel" }), varIs("InMods", "=", 1)], [
-		Call("ModBtnClick", "ModBtnLabel.Slot"),
 	]),
 	E([C("Mouse", "on-object-clicked", { "mouse-button": "left", "click-type": "clicked", "object-clicked": "ModRow" }), varIs("InMods", "=", 1)], [
 		Call("ModBtnClick", "ModRow.Slot"),
 	]),
-	Fn("ModBtnClick", [["Slot", "number"]], [], [
-		E([cmp2("Slot", "<=", "4")], [Call("UninstallSlot", "Slot")]),
-		E([cmp2("Slot", "=", "5")], [Call("InstallModKind", "1")]),
-		E([cmp2("Slot", "=", "6")], [Call("InstallModKind", "2")]),
-		E([cmp2("Slot", "=", "7")], [Call("InstallModKind", "3")]),
-		E([cmp2("Slot", "=", "8")], [Call("InstallModKind", "4")]),
-		E([cmp2("Slot", "=", "9")], [Call("InstallModKind", "5")]),
+	Fn("ModBtnClick", [["Slot", "number"]], [
+		setVar("UiClickLock", "UiClickLock + 1"),
+	], [
+		E([cmp2("UiClickLock", "=", "1"), cmp2("Slot", "<=", "4")], [Call("UninstallSlot", "Slot")]),
+		E([cmp2("UiClickLock", "=", "1"), cmp2("Slot", "=", "5")], [Call("InstallModKind", "1")]),
+		E([cmp2("UiClickLock", "=", "1"), cmp2("Slot", "=", "6")], [Call("InstallModKind", "2")]),
+		E([cmp2("UiClickLock", "=", "1"), cmp2("Slot", "=", "7")], [Call("InstallModKind", "3")]),
+		E([cmp2("UiClickLock", "=", "1"), cmp2("Slot", "=", "8")], [Call("InstallModKind", "4")]),
+		E([cmp2("UiClickLock", "=", "1"), cmp2("Slot", "=", "9")], [Call("InstallModKind", "5")]),
 	]),
 	E([key(KEY.D1), varIs("InMods", "=", 1)], [Call("InstallModKind", "1")]),
 	E([key(KEY.D2), varIs("InMods", "=", 1)], [Call("InstallModKind", "2")]),
@@ -2116,13 +2274,13 @@ sheet("Game_ev", [
 
 	// Молния: бьёт ВСЕХ других врагов в радиусе от точки попадания (не того, в кого попали)
 	Fn("ShockZap", [], [
-		setVar("ChainLock", 1),
-		Call("ShockZapBody"),
 		setVar("ChainLock", 0),
+		Call("ShockZapBody"),
 	], []),
 
 	Fn("ShockZapBody", [], [], [
 		E([
+			cmp2("ChainLock", "<", "2"),
 			cmp2("Enemy.Count", ">", 0),
 			pickBy("Enemy", "distance(Enemy.X, Enemy.Y, ChainX, ChainY)", "<=", 120),
 			pickBy("Enemy", "Enemy.UID", "!=", "HitUID"),
@@ -2133,12 +2291,13 @@ sheet("Game_ev", [
 		]),
 	]),
 
-	// Урон цепи только через сохранённый UID (create/fx не сбивают цель)
+	// Цепь: до 2 целей, 60% урона пули (ECH-8)
 	Fn("ShockHit", [], [], [
-		E([C("Enemy", "pick-by-unique-id", { "unique-id": "ChainTargetUID" })], [
+		E([cmp2("ChainLock", "<", "2"), C("Enemy", "pick-by-unique-id", { "unique-id": "ChainTargetUID" })], [
+			addVar("ChainLock", 1),
 			...floatText("Enemy.X", "Enemy.Y - 40", q("ЦЕПЬ"), "rgbEx(180, 120, 255)"),
 			...fx("Enemy.X", "Enemy.Y", 55, "rgbEx(100, 40, 140)"),
-			Call("DamageEnemy", "ChainTargetUID", "18 + RoomsDone * 2"),
+			Call("DamageEnemy", "ChainTargetUID", "Floor(BulletDmg * 0.6)"),
 		]),
 	]),
 
@@ -2184,7 +2343,7 @@ sheet("Game_ev", [
 	]),
 	Comment("Урон по буру (Оборона): HP ≤ 0 → провал миссии"),
 	Fn("DamageDrill", [["Amount", "number"]], [
-		setVar("DefendHP", "max(0, DefendHP - Amount)"),
+		setVar("DefendHP", "max(0, DefendHP - Amount * 0.5)"),
 		...fx("DefendX", "DefendY", 55, "rgbEx(100, 70, 30)"),
 		...floatText("DefendX", "DefendY - 40", `"-" & Floor(Amount)`, "rgbEx(200, 120, 40)"),
 	], [
@@ -2217,36 +2376,65 @@ sheet("Game_ev", [
 		A("Core", "destroy"),
 	]),
 
-	Comment("Рывок"),
-	E([key(KEY.SPACE), varIs("DashCD", "<=", 0), varIs("GameOver", "=", 0), varIs("InForge", "=", 0), varIs("InMods", "=", 0), varIs("InStarMap", "=", 0), varIs("InMissionMap", "=", 0)], [
-		A("Hero", "set-position", {
-			x: `Hero.X + cos(angle(Hero.X, Hero.Y, Mouse.X, Mouse.Y)) * 120`,
-			y: `Hero.Y + sin(angle(Hero.X, Hero.Y, Mouse.X, Mouse.Y)) * 120`,
-		}),
+	Comment("Рывок: шаги по лучу, стоп перед стеной (не телепорт сквозь Solid)"),
+	Fn("DoDash", [], [
+		setVar("SteerGoal", "angle(Hero.X, Hero.Y, Mouse.X, Mouse.Y)"),
+		setVar("SteerTgtX", "Hero.X"),
+		setVar("SteerTgtY", "Hero.Y"),
+		setVar("SteerHit", 0),
 		setVar("DashCD", 1.4),
 		setVar("IFrames", 0.45),
-		...fx("Hero.X", "Hero.Y", 70, "rgbEx(40, 70, 100)"),
+	], [
+		...DASH_STEP_FRACS.map((t) =>
+			E([varIs("SteerHit", "=", 0)], [
+				setVar("LosBlocked", 0),
+			], [
+				...dashBodyOffsets.map(([ox, oy]) =>
+					E([varIs("LosBlocked", "=", 0)], [
+						setVar("ProbeX", `Hero.X + cos(SteerGoal) * ${DASH_DIST} * ${t} + (${ox})`),
+						setVar("ProbeY", `Hero.Y + sin(SteerGoal) * ${DASH_DIST} * ${t} + (${oy})`),
+					], [
+						E(probeInWallConds(), [setVar("LosBlocked", 1)]),
+					])),
+				E([varIs("LosBlocked", "=", 0)], [
+					setVar("SteerTgtX", `Hero.X + cos(SteerGoal) * ${DASH_DIST} * ${t}`),
+					setVar("SteerTgtY", `Hero.Y + sin(SteerGoal) * ${DASH_DIST} * ${t}`),
+				]),
+				E([varIs("LosBlocked", "=", 1)], [setVar("SteerHit", 1)]),
+			])),
+		E([], [
+			A("Hero", "set-position", { x: "SteerTgtX", y: "SteerTgtY" }),
+			...fx("Hero.X", "Hero.Y", 70, "rgbEx(40, 70, 100)"),
+		]),
+		E(heroWallPush.overlapConds, [heroWallPush.setPos]),
 	]),
+	E([
+		key(KEY.SPACE), varIs("DashCD", "<=", 0), varIs("GameOver", "=", 0), varIs("Paused", "=", 0),
+		varIs("InForge", "=", 0), varIs("InMods", "=", 0), varIs("InStarMap", "=", 0), varIs("InMissionMap", "=", 0),
+	], [Call("DoDash")]),
 
 	Comment("Реликвии Q"),
-	E([key(KEY.Q), varIs("RelicType", "=", q("heal")), varIs("RelicCD", "<=", 0), varIs("GameOver", "=", 0), varIs("InForge", "=", 0), varIs("InMods", "=", 0), varIs("InStarMap", "=", 0), varIs("InMissionMap", "=", 0)], [
-		setIv("Hero", "HP", "min(Hero.MaxHP, Hero.HP + Hero.MaxHP * 0.35)"),
-		setVar("RelicCD", 10),
+	E([key(KEY.Q), varIs("RelicType", "=", q("heal")), varIs("RelicCD", "<=", 0), varIs("GameOver", "=", 0), varIs("Paused", "=", 0), varIs("InForge", "=", 0), varIs("InMods", "=", 0), varIs("InStarMap", "=", 0), varIs("InMissionMap", "=", 0)], [
+		setIv("Hero", "HP", `min(Hero.MaxHP, Hero.HP + Hero.MaxHP * ${RELIC_HEAL_PCT})`),
+		setVar("RelicCD", RELIC_HEAL_CD),
 		...fx("Hero.X", "Hero.Y", 120, "rgbEx(30, 100, 40)"),
 		...floatText("Hero.X", "Hero.Y - 50", q("+HP"), "rgbEx(30, 100, 40)"),
 	]),
-	E([key(KEY.Q), varIs("RelicType", "=", q("shield")), varIs("RelicCD", "<=", 0), varIs("GameOver", "=", 0), varIs("InForge", "=", 0), varIs("InMods", "=", 0), varIs("InStarMap", "=", 0), varIs("InMissionMap", "=", 0)], [
-		setVar("Shield", 2.5),
-		setVar("RelicCD", 12),
+	E([key(KEY.Q), varIs("RelicType", "=", q("shield")), varIs("RelicCD", "<=", 0), varIs("GameOver", "=", 0), varIs("Paused", "=", 0), varIs("InForge", "=", 0), varIs("InMods", "=", 0), varIs("InStarMap", "=", 0), varIs("InMissionMap", "=", 0)], [
+		setVar("Shield", RELIC_SHIELD_T),
+		setVar("RelicCD", RELIC_SHIELD_CD),
 		...fx("Hero.X", "Hero.Y", 110, "rgbEx(30, 60, 100)"),
 		...msg(120, q("ЩИТ!"), "rgbEx(30, 60, 100)"),
 	]),
-	E([key(KEY.Q), varIs("RelicType", "=", q("nova")), varIs("RelicCD", "<=", 0), varIs("GameOver", "=", 0), varIs("InForge", "=", 0), varIs("InMods", "=", 0), varIs("InStarMap", "=", 0), varIs("InMissionMap", "=", 0)], [
-		setVar("RelicCD", 14),
+	E([key(KEY.Q), varIs("RelicType", "=", q("nova")), varIs("RelicCD", "<=", 0), varIs("GameOver", "=", 0), varIs("Paused", "=", 0), varIs("InForge", "=", 0), varIs("InMods", "=", 0), varIs("InStarMap", "=", 0), varIs("InMissionMap", "=", 0)], [
+		setVar("RelicCD", RELIC_NOVA_CD),
 		...fx("Hero.X", "Hero.Y", 160, "rgbEx(100, 30, 20)"),
 	], [
-		E([pickBy("Enemy", "distance(Enemy.X, Enemy.Y, Hero.X, Hero.Y)", "<=", 220), forEach("Enemy")], [
-			Call("DamageEnemy", "Enemy.UID", "30 + RoomsDone * 3"),
+		E([pickBy("Enemy", "distance(Enemy.X, Enemy.Y, Hero.X, Hero.Y)", "<=", String(RELIC_NOVA_R)), forEach("Enemy"), ivIs("Enemy", "IsBoss", "=", 0)], [
+			Call("DamageEnemy", "Enemy.UID", RELIC_NOVA_DMG),
+		]),
+		E([pickBy("Enemy", "distance(Enemy.X, Enemy.Y, Hero.X, Hero.Y)", "<=", String(RELIC_NOVA_R)), forEach("Enemy"), ivIs("Enemy", "IsBoss", "=", 1)], [
+			Call("DamageEnemy", "Enemy.UID", `(${RELIC_NOVA_DMG}) * 0.5`),
 		]),
 	]),
 
@@ -2296,9 +2484,18 @@ sheet("Game_ev", [
 	E([
 		varIs("InMission", "=", 1), varIs("MissionType", "=", 5), varIs("GameOver", "=", 0),
 		varIs("ObjectiveDone", "=", 0), everySec(0.25),
-		cmp2("distance(Hero.X, Hero.Y, SpyTerminal.X, SpyTerminal.Y)", "<", "70"),
+		cmp2("distance(Hero.X, Hero.Y, SpyTerminal.X, SpyTerminal.Y)", "<", String(SPY_RADIUS)),
 	], [
-		setVar("SpyProgress", "min(100, SpyProgress + (Alarm = 1 ? 2 : 6))"),
+		setVar("SpyProgress", `min(100, SpyProgress + (Alarm = 1 ? ${SPY_PROG_ALARM} : ${SPY_PROG_OK}))`),
+	]),
+	// Тревога: +2 врага каждые 10 с, лимит 6
+	E([
+		varIs("InMission", "=", 1), varIs("MissionType", "=", 5), varIs("Alarm", "=", 1),
+		varIs("GameOver", "=", 0), everySec(10), cmp2("Enemy.Count", "<", "6"),
+	], [
+		...spawnEnemyActions(POI.east[0], POI.east[1], 0, { alert: 1 }),
+		...spawnEnemyActions(POI.west[0], POI.west[1], 1, { alert: 1 }),
+		...msg(100, q("ТРЕВОГА! Взлом замедлен"), "rgbEx(160, 40, 30)"),
 	]),
 	E([
 		varIs("InMission", "=", 1), varIs("MissionType", "=", 5), varIs("GameOver", "=", 0),
@@ -2340,38 +2537,34 @@ sheet("Game_ev", [
 		]),
 		E([varIs("InHub", "=", 0), varIs("MissionType", "=", 0)], [
 			A("ObjectiveText", "set-text", {
-				text: `"Истребление" & newline & "Врагов: " & EnemiesAlive & " · до цели " & ${poiDistExpr} & "м"`,
+				text: `"Уничтожь всех врагов — осталось " & EnemiesAlive`,
 			}),
 		]),
 		E([varIs("InHub", "=", 0), varIs("MissionType", "=", 1)], [
 			A("ObjectiveText", "set-text", {
-				text: `"Волны " & Wave & "/" & WaveMax & newline & "Врагов: " & EnemiesAlive`,
+				text: `"Отбей волны: " & Wave & " из " & WaveMax`,
 			}),
 		]),
 		E([varIs("InHub", "=", 0), varIs("MissionType", "=", 2)], [
 			A("ObjectiveText", "set-text", {
-				text: `"Оборона" & newline & "Волна " & Wave & "/" & WaveMax & " · бур " & Floor(DefendHP) & "/" & DefendMaxHP & " · " & ${poiDistExpr} & "м"`,
+				text: `"Защити бур! Волна " & Wave & " из 6" & newline & "Бур: " & Floor(DefendHP)`,
 			}),
 		]),
 		E([varIs("InHub", "=", 0), varIs("MissionType", "=", 3)], [
-			A("ObjectiveText", "set-text", {
-				text: `"Узел-элита" & newline & "Убей элиту · " & ${poiDistExpr} & "м"`,
-			}),
+			A("ObjectiveText", "set-text", { text: q("Убей элиту") }),
 		]),
 		E([varIs("InHub", "=", 0), varIs("MissionType", "=", 5)], [
 			A("ObjectiveText", "set-text", {
-				text: `"Шпионаж" & newline & "Взлом: " & Floor(SpyProgress) & "% · " & ${poiDistExpr} & "м" & (Alarm = 1 ? " · ТРЕВОГА" : "") & (Stealth = 1 ? " · стелс" : "")`,
+				text: `"Взломай терминал: " & Floor(SpyProgress) & "%" & (Alarm = 1 ? newline & "ТРЕВОГА! Взлом замедлен" : "")`,
 			}),
 		]),
 		E([varIs("InHub", "=", 0), varIs("MissionType", "=", 6)], [
 			A("ObjectiveText", "set-text", {
-				text: `"Спасение" & newline & (HostageOK = 1 ? "Эвак " & ${poiDistExpr} & "м" : "Заложник " & ${poiDistExpr} & "м") & (Stealth = 1 ? " · стелс" : "")`,
+				text: q("Найди заложника и доведи до эвакуации"),
 			}),
 		]),
 		E([varIs("InHub", "=", 0), varIs("MissionType", "=", 4)], [
-			A("ObjectiveText", "set-text", {
-				text: `"Босс мира" & newline & LayerName & " · " & ${poiDistExpr} & "м"`,
-			}),
+			A("ObjectiveText", "set-text", { text: q("Победи голема") }),
 		]),
 	]),
 	Fn("RefreshForge", [], [
@@ -2395,49 +2588,87 @@ sheet("Game_ev", [
 		E([pickBy("ForgeBtnLabel", "ForgeBtnLabel.Slot", "=", "3")], [
 			A("ForgeBtnLabel", "set-text", { text: `(Element = 3 ? "АКТИВ" : (CoreShock > 0 ? "ВЗЯТЬ" : "НЕТ ЯДЕР"))` }),
 		]),
+		E([], [
+			setVar("ForgeDmgCost", `${FORGE_DMG_COST_BASE} + BuyDmgN * ${FORGE_DMG_COST_STEP}`),
+			setVar("ForgeMaxHpCost", `${FORGE_MAXHP_COST_BASE} + BuyMaxHpN * ${FORGE_MAXHP_COST_STEP}`),
+		]),
 		E([pickBy("ForgeBtn", "ForgeBtn.Slot", "=", "4")], [
-			A("ForgeBtn", "set-animation", { animation: `(CoreFire >= 2 ? "buy" : "deny")`, from: "beginning" }),
+			A("ForgeBtn", "set-animation", { animation: `(Gold >= ${FORGE_HP_COST} ? "buy" : "deny")`, from: "beginning" }),
 		]),
 		E([pickBy("ForgeBtnLabel", "ForgeBtnLabel.Slot", "=", "4")], [
-			A("ForgeBtnLabel", "set-text", { text: `(CoreFire >= 2 ? "КОВАТЬ" : "НУЖНО 2")` }),
+			A("ForgeBtnLabel", "set-text", { text: `(Gold >= ${FORGE_HP_COST} ? "45з" : "ДОРОГО")` }),
 		]),
 		E([pickBy("ForgeBtn", "ForgeBtn.Slot", "=", "5")], [
-			A("ForgeBtn", "set-animation", { animation: `(CoreIce >= 2 ? "buy" : "deny")`, from: "beginning" }),
+			A("ForgeBtn", "set-animation", { animation: `(BuyDmgN < ${FORGE_DMG_LIMIT} ? (Gold >= ForgeDmgCost ? "buy" : "deny") : "deny")`, from: "beginning" }),
 		]),
 		E([pickBy("ForgeBtnLabel", "ForgeBtnLabel.Slot", "=", "5")], [
-			A("ForgeBtnLabel", "set-text", { text: `(CoreIce >= 2 ? "КОВАТЬ" : "НУЖНО 2")` }),
+			A("ForgeBtnLabel", "set-text", { text: `(BuyDmgN >= ${FORGE_DMG_LIMIT} ? "ЛИМИТ" : (ForgeDmgCost & "з"))` }),
 		]),
 		E([pickBy("ForgeBtn", "ForgeBtn.Slot", "=", "6")], [
-			A("ForgeBtn", "set-animation", { animation: `(CoreShock >= 2 ? "buy" : "deny")`, from: "beginning" }),
+			A("ForgeBtn", "set-animation", { animation: `(BuyMaxHpN < ${FORGE_MAXHP_LIMIT} ? (Gold >= ForgeMaxHpCost ? "buy" : "deny") : "deny")`, from: "beginning" }),
 		]),
 		E([pickBy("ForgeBtnLabel", "ForgeBtnLabel.Slot", "=", "6")], [
+			A("ForgeBtnLabel", "set-text", { text: `(BuyMaxHpN >= ${FORGE_MAXHP_LIMIT} ? "ЛИМИТ" : (ForgeMaxHpCost & "з"))` }),
+		]),
+		E([pickBy("ForgeBtn", "ForgeBtn.Slot", "=", "7")], [
+			A("ForgeBtn", "set-animation", { animation: `(CoreFire >= 2 ? "buy" : "deny")`, from: "beginning" }),
+		]),
+		E([pickBy("ForgeBtnLabel", "ForgeBtnLabel.Slot", "=", "7")], [
+			A("ForgeBtnLabel", "set-text", { text: `(CoreFire >= 2 ? "КОВАТЬ" : "НУЖНО 2")` }),
+		]),
+		E([pickBy("ForgeBtn", "ForgeBtn.Slot", "=", "8")], [
+			A("ForgeBtn", "set-animation", { animation: `(CoreIce >= 2 ? "buy" : "deny")`, from: "beginning" }),
+		]),
+		E([pickBy("ForgeBtnLabel", "ForgeBtnLabel.Slot", "=", "8")], [
+			A("ForgeBtnLabel", "set-text", { text: `(CoreIce >= 2 ? "КОВАТЬ" : "НУЖНО 2")` }),
+		]),
+		E([pickBy("ForgeBtn", "ForgeBtn.Slot", "=", "9")], [
+			A("ForgeBtn", "set-animation", { animation: `(CoreShock >= 2 ? "buy" : "deny")`, from: "beginning" }),
+		]),
+		E([pickBy("ForgeBtnLabel", "ForgeBtnLabel.Slot", "=", "9")], [
 			A("ForgeBtnLabel", "set-text", { text: `(CoreShock >= 2 ? "КОВАТЬ" : "НУЖНО 2")` }),
 		]),
 	]),
 
-	Comment("Оружие на полу (хаб / миссия — одна локация)"),
+	Comment("Оружие на полу — только в хабе; подбор в упоре (~80px)"),
 	Fn("RefreshFloorGun", [], [], [
-		E([varIs("FloorGun", "<", 0)], [
-			A("FloorWeapon", "set-visible", { visibility: "invisible" }),
-			A("FloorWeapon", "set-position", { x: "-900", y: "-900" }),
-		]),
+		E([varIs("FloorGun", "<", 0)], [Call("SyncFloorGunVisual")]),
 		E([varIs("FloorGun", ">=", 0)], [
 			setVar("FloorX", "Hero.X + 50"),
 			setVar("FloorY", "Hero.Y + 20"),
 			Call("SyncFloorGunVisual"),
 		]),
 	]),
+	// Анимация и подпись строго от FloorGun (не от устаревшего FloorAnim).
 	Fn("SyncFloorGunVisual", [], [], [
 		E([varIs("FloorGun", "<", 0)], [
 			A("FloorWeapon", "set-visible", { visibility: "invisible" }),
 			A("FloorWeapon", "set-position", { x: "-900", y: "-900" }),
+			A("FloorHint", "set-visible", { visibility: "invisible" }),
+			A("FloorHint", "set-position", { x: "-900", y: "-900" }),
 		]),
-		E([varIs("FloorGun", ">=", 0)], [
+		E([varIs("FloorGun", ">=", 0), varIs("InHub", "=", 0)], [
+			A("FloorWeapon", "set-visible", { visibility: "invisible" }),
+			A("FloorWeapon", "set-position", { x: "-900", y: "-900" }),
+			A("FloorHint", "set-visible", { visibility: "invisible" }),
+			A("FloorHint", "set-position", { x: "-900", y: "-900" }),
+		]),
+		E([varIs("FloorGun", ">=", 0), varIs("InHub", "=", 1)], [
 			A("FloorWeapon", "set-position", { x: "FloorX", y: "FloorY" }),
 			A("FloorWeapon", "set-visible", { visibility: "visible" }),
-			A("FloorWeapon", "set-animation", { animation: "FloorAnim", from: "beginning" }),
+			A("FloorHint", "set-position", { x: "FloorX - 90", y: "FloorY + 28" }),
+			A("FloorHint", "set-visible", { visibility: "visible" }),
+		], [
+			...[0, 1, 2, 3].map((t) =>
+				E([varIs("FloorGun", "=", t)], [
+					setVar("FloorAnim", q(FLOOR_ANIM_BY_GUN[t])),
+					setVar("FloorGunName", q(GUN_TYPE_NAMES[t])),
+					A("FloorWeapon", "set-animation", { animation: q(FLOOR_ANIM_BY_GUN[t]), from: "beginning" }),
+					A("FloorHint", "set-text", { text: `"G — " & ${q(GUN_TYPE_NAMES[t])}` }),
+				])),
 		]),
 	]),
+	// Слот 1 навсегда Эхо-клинок; крафт только в слот 2 (занятый 2 → пол).
 	Fn("PushCraftedGun", [["NewGun", "number"]], [], [
 		E([varIs("Gun2", ">=", 0)], [
 			Call("StripGun2Mods"),
@@ -2446,73 +2677,109 @@ sheet("Game_ev", [
 			...msg(80, q("Оружие из слота 2 выброшено на пол"), "rgbEx(90, 70, 40)"),
 		]),
 		E([], [
-			setVar("Gun2", "Gun1"),
-			setVar("Gun1", "NewGun"),
-			setVar("Hand", 1),
+			setVar("Gun1", 0),
+			setVar("Gun2", "NewGun"),
+			setVar("Hand", 2),
 			setVar("Element", "NewGun"),
 		]),
 	]),
 
-	Comment("Кузница: покупка по слоту (мышь / клавиши 1–6)"),
-	Fn("ForgeBuy", [["Slot", "number"]], [], [
-		E([cmp2("Slot", "=", "1"), varIs("CoreFire", ">", 0)], [
+	Comment("Кузница: покупка по слоту (мышь / клавиши 1–6); UiClickLock — один покупка на тик"),
+	Fn("ForgeBuy", [["Slot", "number"]], [
+		setVar("UiClickLock", "UiClickLock + 1"),
+	], [
+		E([cmp2("UiClickLock", "=", "1"), cmp2("Slot", "=", "1"), varIs("CoreFire", ">", 0)], [
 			addVar("CoreFire", -1), setVar("EchoElement", 1),
 			...msg(560, q("Эхо-клинок заряжен: ОГОНЬ (возьми слот с эхо)"), "rgbEx(100, 40, 10)"),
 			Call("RefreshForge"),
 		]),
-		E([cmp2("Slot", "=", "1"), varIs("CoreFire", "<=", 0)], [
+		E([cmp2("UiClickLock", "=", "1"), cmp2("Slot", "=", "1"), varIs("CoreFire", "<=", 0)], [
 			...msg(560, q("Нет ядер огня"), "rgbEx(100, 40, 40)"),
 		]),
-		E([cmp2("Slot", "=", "2"), varIs("CoreIce", ">", 0)], [
+		E([cmp2("UiClickLock", "=", "1"), cmp2("Slot", "=", "2"), varIs("CoreIce", ">", 0)], [
 			addVar("CoreIce", -1), setVar("EchoElement", 2),
 			...msg(560, q("Эхо-клинок заряжен: ЛЁД"), "rgbEx(30, 60, 100)"),
 			Call("RefreshForge"),
 		]),
-		E([cmp2("Slot", "=", "2"), varIs("CoreIce", "<=", 0)], [
+		E([cmp2("UiClickLock", "=", "1"), cmp2("Slot", "=", "2"), varIs("CoreIce", "<=", 0)], [
 			...msg(560, q("Нет ядер льда"), "rgbEx(100, 40, 40)"),
 		]),
-		E([cmp2("Slot", "=", "3"), varIs("CoreShock", ">", 0)], [
+		E([cmp2("UiClickLock", "=", "1"), cmp2("Slot", "=", "3"), varIs("CoreShock", ">", 0)], [
 			addVar("CoreShock", -1), setVar("EchoElement", 3),
 			...msg(560, q("Эхо-клинок заряжен: МОЛНИЯ"), "rgbEx(70, 30, 100)"),
 			Call("RefreshForge"),
 		]),
-		E([cmp2("Slot", "=", "3"), varIs("CoreShock", "<=", 0)], [
+		E([cmp2("UiClickLock", "=", "1"), cmp2("Slot", "=", "3"), varIs("CoreShock", "<=", 0)], [
 			...msg(560, q("Нет ядер молнии"), "rgbEx(100, 40, 40)"),
 		]),
-		E([cmp2("Slot", "=", "4"), varIs("CoreFire", ">=", 2)], [
+		E([cmp2("UiClickLock", "=", "1"), cmp2("Slot", "=", "4"), cmp2("Gold", ">=", String(FORGE_HP_COST))], [
+			addVar("Gold", -FORGE_HP_COST),
+			setIv("Hero", "HP", `min(Hero.MaxHP, Hero.HP + 30)`),
+			...msg(560, q("Заплатка: +30 HP"), "rgbEx(80, 140, 80)"),
+			Call("RefreshForge"),
+		]),
+		E([cmp2("UiClickLock", "=", "1"), cmp2("Slot", "=", "4"), cmp2("Gold", "<", String(FORGE_HP_COST))], [
+			...msg(560, q("Нужно 45 золота"), "rgbEx(100, 40, 40)"),
+		]),
+		E([cmp2("UiClickLock", "=", "1"), cmp2("Slot", "=", "5"), cmp2("BuyDmgN", "<", String(FORGE_DMG_LIMIT)), cmp2("Gold", ">=", "ForgeDmgCost")], [
+			setVar("Gold", "Gold - ForgeDmgCost"),
+			addIv("Hero", "Damage", 3),
+			addVar("BuyDmgN", 1),
+			...msg(560, q("Закалка: +3 урона"), "rgbEx(160, 100, 40)"),
+			Call("RefreshForge"),
+		]),
+		E([cmp2("UiClickLock", "=", "1"), cmp2("Slot", "=", "5"), cmp2("BuyDmgN", ">=", String(FORGE_DMG_LIMIT))], [
+			...msg(560, q("Лимит закалки (5)"), "rgbEx(100, 40, 40)"),
+		]),
+		E([cmp2("UiClickLock", "=", "1"), cmp2("Slot", "=", "5"), cmp2("BuyDmgN", "<", String(FORGE_DMG_LIMIT)), cmp2("Gold", "<", "ForgeDmgCost")], [
+			...msg(560, q("Не хватает золота на закалку"), "rgbEx(100, 40, 40)"),
+		]),
+		E([cmp2("UiClickLock", "=", "1"), cmp2("Slot", "=", "6"), cmp2("BuyMaxHpN", "<", String(FORGE_MAXHP_LIMIT)), cmp2("Gold", ">=", "ForgeMaxHpCost")], [
+			setVar("Gold", "Gold - ForgeMaxHpCost"),
+			addIv("Hero", "MaxHP", 20),
+			addIv("Hero", "HP", 20),
+			addVar("BuyMaxHpN", 1),
+			...msg(560, q("Усиление: +20 макс. HP"), "rgbEx(80, 120, 160)"),
+			Call("RefreshForge"),
+		]),
+		E([cmp2("UiClickLock", "=", "1"), cmp2("Slot", "=", "6"), cmp2("BuyMaxHpN", ">=", String(FORGE_MAXHP_LIMIT))], [
+			...msg(560, q("Лимит усиления (4)"), "rgbEx(100, 40, 40)"),
+		]),
+		E([cmp2("UiClickLock", "=", "1"), cmp2("Slot", "=", "6"), cmp2("BuyMaxHpN", "<", String(FORGE_MAXHP_LIMIT)), cmp2("Gold", "<", "ForgeMaxHpCost")], [
+			...msg(560, q("Не хватает золота на усиление"), "rgbEx(100, 40, 40)"),
+		]),
+		E([cmp2("UiClickLock", "=", "1"), cmp2("Slot", "=", "7"), varIs("CoreFire", ">=", 2)], [
 			addVar("CoreFire", -2),
 			Call("PushCraftedGun", "1"),
-			...msg(560, q("Скован Клинок пепла → слот 1"), "rgbEx(100, 50, 10)"),
+			...msg(560, q("Скован Клинок пепла → слот 2"), "rgbEx(100, 50, 10)"),
 			Call("RefreshForge"),
 		]),
-		E([cmp2("Slot", "=", "4"), varIs("CoreFire", "<", 2)], [
+		E([cmp2("UiClickLock", "=", "1"), cmp2("Slot", "=", "7"), varIs("CoreFire", "<", 2)], [
 			...msg(560, q("Нужно 2 ядра огня"), "rgbEx(100, 40, 40)"),
 		]),
-		E([cmp2("Slot", "=", "5"), varIs("CoreIce", ">=", 2)], [
+		E([cmp2("UiClickLock", "=", "1"), cmp2("Slot", "=", "8"), varIs("CoreIce", ">=", 2)], [
 			addVar("CoreIce", -2),
 			Call("PushCraftedGun", "2"),
-			...msg(560, q("Скован Клинок инея → слот 1"), "rgbEx(40, 70, 110)"),
+			...msg(560, q("Скован Клинок инея → слот 2"), "rgbEx(40, 70, 110)"),
 			Call("RefreshForge"),
 		]),
-		E([cmp2("Slot", "=", "5"), varIs("CoreIce", "<", 2)], [
+		E([cmp2("UiClickLock", "=", "1"), cmp2("Slot", "=", "8"), varIs("CoreIce", "<", 2)], [
 			...msg(560, q("Нужно 2 ядра льда"), "rgbEx(100, 40, 40)"),
 		]),
-		E([cmp2("Slot", "=", "6"), varIs("CoreShock", ">=", 2)], [
+		E([cmp2("UiClickLock", "=", "1"), cmp2("Slot", "=", "9"), varIs("CoreShock", ">=", 2)], [
 			addVar("CoreShock", -2),
 			Call("PushCraftedGun", "3"),
-			...msg(560, q("Скован Клинок грозы → слот 1"), "rgbEx(80, 40, 110)"),
+			...msg(560, q("Скован Клинок грозы → слот 2"), "rgbEx(80, 40, 110)"),
 			Call("RefreshForge"),
 		]),
-		E([cmp2("Slot", "=", "6"), varIs("CoreShock", "<", 2)], [
+		E([cmp2("UiClickLock", "=", "1"), cmp2("Slot", "=", "9"), varIs("CoreShock", "<", 2)], [
 			...msg(560, q("Нужно 2 ядра молнии"), "rgbEx(100, 40, 40)"),
 		]),
 	]),
 
+	// Только ForgeBtn: Label лежит поверх кнопки — оба клика = двойной крафт (2 пушки / −4 ядра).
 	E([C("Mouse", "on-object-clicked", { "mouse-button": "left", "click-type": "clicked", "object-clicked": "ForgeBtn" }), varIs("InForge", "=", 1)], [
 		Call("ForgeBuy", "ForgeBtn.Slot"),
-	]),
-	E([C("Mouse", "on-object-clicked", { "mouse-button": "left", "click-type": "clicked", "object-clicked": "ForgeBtnLabel" }), varIs("InForge", "=", 1)], [
-		Call("ForgeBuy", "ForgeBtnLabel.Slot"),
 	]),
 	E([C("Mouse", "on-object-clicked", { "mouse-button": "left", "click-type": "clicked", "object-clicked": "ForgeRow" }), varIs("InForge", "=", 1)], [
 		Call("ForgeBuy", "ForgeRow.Slot"),
@@ -2536,39 +2803,64 @@ sheet("Game_ev", [
 	E([key(KEY.D2), varIs("InForge", "=", 0), varIs("InMods", "=", 0), varIs("InStarMap", "=", 0), varIs("InMissionMap", "=", 0), varIs("Gun2", "<", 0), varIs("GameOver", "=", 0)], [
 		...msg(520, q("Слот 2 пуст"), "rgbEx(100, 40, 40)"),
 	]),
-	E([key(KEY.G), varIs("FloorGun", ">=", 0), varIs("GameOver", "=", 0), varIs("InStarMap", "=", 0), varIs("InMissionMap", "=", 0), varIs("InForge", "=", 0), varIs("InMods", "=", 0)], [
-		setVar("TempGun", "ActiveGun"),
+	E([
+		key(KEY.G), varIs("FloorGun", ">=", 0), varIs("InHub", "=", 1), varIs("GameOver", "=", 0),
+		varIs("InStarMap", "=", 0), varIs("InMissionMap", "=", 0), varIs("InForge", "=", 0), varIs("InMods", "=", 0),
+		cmp2("distance(Hero.X, Hero.Y, FloorX, FloorY)", ">", "80"),
 	], [
-		E([varIs("Hand", "=", 1)], [
-			setVar("Gun1", "FloorGun"),
-			setVar("FloorGun", "TempGun"),
-			Call("RefreshFloorGun"),
-			...msg(520, `"Подобрал: " & Gun1Name & "  (старое на полу)"`, "rgbEx(80, 100, 40)"),
-		]),
-		E([varIs("Hand", "=", 2)], [
-			setVar("Gun2", "FloorGun"),
-			setVar("FloorGun", "TempGun"),
-			Call("RefreshFloorGun"),
-			...msg(520, `"Подобрал: " & Gun2Name & "  (старое на пол)"`, "rgbEx(80, 100, 40)"),
-		]),
+		...msg(520, q("Подойди ближе к оружию на полу"), "rgbEx(100, 70, 40)"),
 	]),
-	E([C("Mouse", "on-object-clicked", { "mouse-button": "left", "click-type": "clicked", "object-clicked": "FloorWeapon" }), varIs("FloorGun", ">=", 0), varIs("GameOver", "=", 0)], [
-		setVar("TempGun", "ActiveGun"),
+	E([
+		key(KEY.G), varIs("FloorGun", ">=", 0), varIs("InHub", "=", 1), varIs("GameOver", "=", 0),
+		varIs("InStarMap", "=", 0), varIs("InMissionMap", "=", 0), varIs("InForge", "=", 0), varIs("InMods", "=", 0),
+		cmp2("distance(Hero.X, Hero.Y, FloorX, FloorY)", "<=", "80"),
+		varIs("Hand", "=", 1),
 	], [
-		E([varIs("Hand", "=", 1)], [
-			setVar("Gun1", "FloorGun"),
-			setVar("FloorGun", "TempGun"),
-			Call("RefreshFloorGun"),
-			...msg(520, `"Подобрал: " & Gun1Name`, "rgbEx(80, 100, 40)"),
-		]),
-		E([varIs("Hand", "=", 2)], [
-			setVar("Gun2", "FloorGun"),
-			setVar("FloorGun", "TempGun"),
-			Call("RefreshFloorGun"),
-			...msg(520, `"Подобрал: " & Gun2Name`, "rgbEx(80, 100, 40)"),
-		]),
+		...msg(520, q("Слот 1 — эхо-клинок (залочен). Нажми 2 и G у пола"), "rgbEx(100, 70, 40)"),
 	]),
-	E([key(KEY.G), varIs("FloorGun", "<", 0), varIs("GameOver", "=", 0)], [
+	E([
+		key(KEY.G), varIs("FloorGun", ">=", 0), varIs("InHub", "=", 1), varIs("GameOver", "=", 0),
+		varIs("InStarMap", "=", 0), varIs("InMissionMap", "=", 0), varIs("InForge", "=", 0), varIs("InMods", "=", 0),
+		cmp2("distance(Hero.X, Hero.Y, FloorX, FloorY)", "<=", "80"),
+		varIs("Hand", "=", 2),
+	], [
+		setVar("TempGun", "Gun2"),
+		setVar("Gun2", "FloorGun"),
+		setVar("FloorGun", "TempGun"),
+		Call("RefreshFloorGun"),
+		...msg(520, `"Подобрал: " & Gun2Name & "  (старое на пол)"`, "rgbEx(80, 100, 40)"),
+	]),
+	E([
+		C("Mouse", "on-object-clicked", { "mouse-button": "left", "click-type": "clicked", "object-clicked": "FloorWeapon" }),
+		varIs("FloorGun", ">=", 0), varIs("InHub", "=", 1), varIs("GameOver", "=", 0),
+		varIs("InForge", "=", 0), varIs("InMods", "=", 0),
+		cmp2("distance(Hero.X, Hero.Y, FloorX, FloorY)", ">", "80"),
+	], [
+		...msg(520, q("Подойди ближе к оружию на полу"), "rgbEx(100, 70, 40)"),
+	]),
+	E([
+		C("Mouse", "on-object-clicked", { "mouse-button": "left", "click-type": "clicked", "object-clicked": "FloorWeapon" }),
+		varIs("FloorGun", ">=", 0), varIs("InHub", "=", 1), varIs("GameOver", "=", 0),
+		varIs("InForge", "=", 0), varIs("InMods", "=", 0),
+		cmp2("distance(Hero.X, Hero.Y, FloorX, FloorY)", "<=", "80"),
+		varIs("Hand", "=", 1),
+	], [
+		...msg(520, q("Слот 1 — эхо-клинок (залочен). Нажми 2 и клик по полу"), "rgbEx(100, 70, 40)"),
+	]),
+	E([
+		C("Mouse", "on-object-clicked", { "mouse-button": "left", "click-type": "clicked", "object-clicked": "FloorWeapon" }),
+		varIs("FloorGun", ">=", 0), varIs("InHub", "=", 1), varIs("GameOver", "=", 0),
+		varIs("InForge", "=", 0), varIs("InMods", "=", 0),
+		cmp2("distance(Hero.X, Hero.Y, FloorX, FloorY)", "<=", "80"),
+		varIs("Hand", "=", 2),
+	], [
+		setVar("TempGun", "Gun2"),
+		setVar("Gun2", "FloorGun"),
+		setVar("FloorGun", "TempGun"),
+		Call("RefreshFloorGun"),
+		...msg(520, `"Подобрал: " & Gun2Name`, "rgbEx(80, 100, 40)"),
+	]),
+	E([key(KEY.G), varIs("InHub", "=", 1), varIs("FloorGun", "<", 0), varIs("GameOver", "=", 0)], [
 		...msg(520, q("На полу нет оружия"), "rgbEx(100, 40, 40)"),
 	]),
 	Fn("SaveMissionProg", [], [], [
@@ -2659,7 +2951,9 @@ sheet("Game_ev", [
 			E([varIs("MissionType", "=", Number(id))], [setVar("MissionTypeName", q(name))])),
 	]),
 	/** Короткие переменные вместо nested ternary в тике / HUD / уроне. */
-	Fn("SyncCombatMeta", [], [], [
+	Fn("SyncCombatMeta", [], [
+		setVar("Gun1", 0),
+	], [
 		E([varIs("Hand", "=", 1)], [
 			setVar("ActiveGun", "Gun1"),
 			setVar("HandModA", "Gun1ModA"), setVar("HandModB", "Gun1ModB"),
@@ -2693,11 +2987,15 @@ sheet("Game_ev", [
 			]),
 			E([varIs("Gun1", "<", 0)], [setVar("Gun1Name", q("—"))]),
 			E([varIs("Gun2", "=", 0)], [setVar("Gun2Name", q(GUN_TYPE_NAMES[0]))]),
-			E([varIs("FloorGun", "=", 0)], [setVar("FloorGunName", q(GUN_TYPE_NAMES[0]))]),
+			E([varIs("FloorGun", "=", 0)], [
+				setVar("FloorGunName", q(GUN_TYPE_NAMES[0])),
+				setVar("FloorAnim", q("echo")),
+			]),
 			E([varIs("Element", "=", 1)], [setVar("ElemAnim", q("fire"))]),
 			E([varIs("Element", "=", 2)], [setVar("ElemAnim", q("ice"))]),
 			E([varIs("Element", "=", 3)], [setVar("ElemAnim", q("shock"))]),
 		]),
+		E([varIs("InHub", "=", 1)], [Call("SyncFloorGunVisual")]),
 		E([varIs("Hand", "=", 1)], [setVar("HandGunName", "Gun1Name")]),
 		E([varIs("Hand", "=", 2)], [setVar("HandGunName", "Gun2Name")]),
 		E([], [
@@ -2721,9 +3019,9 @@ sheet("Game_ev", [
 			E([varIs("ActiveGun", "=", 1)], [addVar("BulletDmg", 12)]),
 			E([varIs("ActiveGun", "=", 2)], [addVar("BulletDmg", 9)]),
 			E([varIs("ActiveGun", "=", 3)], [addVar("BulletDmg", 12)]),
-			E([varIs("ActiveGun", "<=", 0), varIs("Element", "=", 1)], [addVar("BulletDmg", 6)]),
+			E([varIs("ActiveGun", "<=", 0), varIs("Element", "=", 1)], [addVar("BulletDmg", 4)]),
 			E([varIs("ActiveGun", "<=", 0), varIs("Element", "=", 2)], [addVar("BulletDmg", 3)]),
-			E([varIs("ActiveGun", "<=", 0), varIs("Element", "=", 3)], [addVar("BulletDmg", 8)]),
+			E([varIs("ActiveGun", "<=", 0), varIs("Element", "=", 3)], [addVar("BulletDmg", 5)]),
 		]),
 		E([], [
 			setVar("RelicReadyText", q(" ГОТОВА")),
@@ -2768,9 +3066,9 @@ sheet("Game_ev", [
 		addVar("Mission", 1),
 		addVar("RoomsDone", 1),
 		Call("SaveMissionProg"),
-		setIv("Hero", "HP", "min(Hero.MaxHP, Hero.HP + Hero.MaxHP * 0.2)"),
+		setIv("Hero", "HP", `min(Hero.MaxHP, Hero.HP + Hero.MaxHP * ${HUB_HEAL_NODE})`),
 		Call("EnterHub"),
-		...msg(70, `"Узел пройден → следующий " & Mission & "/" & PlanetNodes`, "rgbEx(80, 160, 100)"),
+		...msg(70, `"Корабль подлатал броню (+25%) · узел " & Mission & "/" & PlanetNodes`, "rgbEx(80, 160, 100)"),
 		...fx("Hero.X", "Hero.Y", 120, "rgbEx(60, 140, 80)"),
 	], []),
 	Fn("AdvanceLayer", [], [
@@ -2780,26 +3078,28 @@ sheet("Game_ev", [
 		setVar("Mission", 1),
 		addVar("RoomsDone", 1),
 		Call("SaveMissionProg"),
-		setIv("Hero", "HP", "min(Hero.MaxHP, Hero.HP + Hero.MaxHP * 0.35)"),
+		setIv("Hero", "HP", `min(Hero.MaxHP, Hero.HP + Hero.MaxHP * ${HUB_HEAL_LAYER})`),
 		Call("EnterHub"),
-		...msg(60, `"Новая планета → " & LayerName & " · узлов: " & PlanetNodes`, "rgbEx(80, 140, 200)"),
+		...msg(60, `"Новый мир, свежие силы (+50%) → " & LayerName & " · узлов: " & PlanetNodes`, "rgbEx(80, 140, 200)"),
 		...fx("Hero.X", "Hero.Y", 140, "rgbEx(60, 100, 160)"),
 	], []),
+	// NodeWasLast фиксируем ДО Advance*: иначе после Mission++ срабатывает и смена планеты (скип босса).
 	Fn("CompleteMission", [], [
 		setVar("ObjectiveDone", 1),
 		setVar("SpawnReady", 0),
 		setVar("BossAlive", 0),
+		setVar("NodeWasLast", "(Mission >= PlanetNodes ? 1 : 0)"),
 	], [
-		E([cmp2("Mission", "<", "PlanetNodes")], [Call("AdvanceMission")]),
-		E([cmp2("Mission", ">=", "PlanetNodes"), cmp2("Layer", "<", String(PLANET_COUNT))], [Call("AdvanceLayer")]),
-		E([cmp2("Mission", ">=", "PlanetNodes"), varIs("Layer", "=", PLANET_COUNT)], [
+		E([varIs("NodeWasLast", "=", 0)], [Call("AdvanceMission")]),
+		E([varIs("NodeWasLast", "=", 1), cmp2("Layer", "<", String(PLANET_COUNT))], [Call("AdvanceLayer")]),
+		E([varIs("NodeWasLast", "=", 1), varIs("Layer", "=", PLANET_COUNT)], [
 			setVar("Won", 1),
 			setVar("GameOver", 1),
 			A("Hero", "set-ignoring-input", { input: "start-ignoring" }, "EightDir"),
 			A("GameOverText", "set-visible", { visibility: "visible" }),
 			A("GameOverText", "set-font-color", { color: "rgbEx(40, 100, 50)" }),
 			A("GameOverText", "set-text", {
-				text: `"ЭХО ПРОЙДЕНО!" & newline & newline & "Планеты: ${PLANET_COUNT}/${PLANET_COUNT}   Убито: " & Kills & newline & newline & "R — новый забег"`,
+				text: `"ЭХО ЗАТИХЛО" & newline & newline & "Бездна закрыта, миры дышат свободно." & newline & "Но эхо помнит всё — и однажды позовёт снова." & newline & newline & "Убито: " & Kills & " · R — новый забег"`,
 			}),
 			A("System", "set-time-scale", { "time-scale": "0" }),
 		]),
@@ -2858,16 +3158,34 @@ sheet("Game_ev", [
 	E([
 		key(KEY.V), varIs("GameOver", "=", 0), varIs("InForge", "=", 0), varIs("InMods", "=", 0), varIs("InStarMap", "=", 0), varIs("InMissionMap", "=", 0),
 		varIs("InHub", "=", 1),
-		cmp2("distance(Hero.X, Hero.Y, EchoGate.X, EchoGate.Y)", "<", "160"),
+		cmp2("distance(Hero.X, Hero.Y, EchoGate.X, EchoGate.Y)", ">=", String(HUB_INTERACT)),
+	], [...msg(90, q("Подойди ближе к Эхо-вратам"), "rgbEx(100, 70, 40)")]),
+	E([
+		key(KEY.V), varIs("GameOver", "=", 0), varIs("InForge", "=", 0), varIs("InMods", "=", 0), varIs("InStarMap", "=", 0), varIs("InMissionMap", "=", 0),
+		varIs("InHub", "=", 1),
+		cmp2("distance(Hero.X, Hero.Y, EchoGate.X, EchoGate.Y)", "<", String(HUB_INTERACT)),
 	], [Call("OpenStarMap")]),
 	E([
 		C("Mouse", "on-object-clicked", { "mouse-button": "left", "click-type": "clicked", "object-clicked": "EchoGate" }),
 		varIs("GameOver", "=", 0), varIs("InForge", "=", 0), varIs("InMods", "=", 0), varIs("InStarMap", "=", 0), varIs("InMissionMap", "=", 0),
 		varIs("InHub", "=", 1),
+		cmp2("distance(Hero.X, Hero.Y, EchoGate.X, EchoGate.Y)", ">=", String(HUB_INTERACT)),
+	], [...msg(90, q("Подойди ближе к Эхо-вратам"), "rgbEx(100, 70, 40)")]),
+	E([
+		C("Mouse", "on-object-clicked", { "mouse-button": "left", "click-type": "clicked", "object-clicked": "EchoGate" }),
+		varIs("GameOver", "=", 0), varIs("InForge", "=", 0), varIs("InMods", "=", 0), varIs("InStarMap", "=", 0), varIs("InMissionMap", "=", 0),
+		varIs("InHub", "=", 1),
+		cmp2("distance(Hero.X, Hero.Y, EchoGate.X, EchoGate.Y)", "<", String(HUB_INTERACT)),
 	], [Call("OpenStarMap")]),
 	E([
 		key(KEY.F), varIs("GameOver", "=", 0), varIs("InForge", "=", 0), varIs("InMods", "=", 0), varIs("InStarMap", "=", 0), varIs("InMissionMap", "=", 0),
 		varIs("InHub", "=", 1),
+		cmp2("distance(Hero.X, Hero.Y, EchoGate.X, EchoGate.Y)", ">=", String(HUB_INTERACT)),
+	], [...msg(90, q("Подойди ближе к Эхо-вратам (узлы / планеты)"), "rgbEx(100, 70, 40)")]),
+	E([
+		key(KEY.F), varIs("GameOver", "=", 0), varIs("InForge", "=", 0), varIs("InMods", "=", 0), varIs("InStarMap", "=", 0), varIs("InMissionMap", "=", 0),
+		varIs("InHub", "=", 1),
+		cmp2("distance(Hero.X, Hero.Y, EchoGate.X, EchoGate.Y)", "<", String(HUB_INTERACT)),
 	], [Call("OpenMissionMap")]),
 	E([key(KEY.X), varIs("InStarMap", "=", 1)], [Call("CloseStarMap")]),
 	E([C("Mouse", "on-object-clicked", { "mouse-button": "left", "click-type": "clicked", "object-clicked": "StarClose" }), varIs("InStarMap", "=", 1)], [
@@ -2906,12 +3224,24 @@ sheet("Game_ev", [
 		]),
 	]),
 
-	E([key(KEY.E), varIs("InHub", "=", 1), varIs("InForge", "=", 0), varIs("InMods", "=", 0), varIs("InStarMap", "=", 0), varIs("InMissionMap", "=", 0), varIs("GameOver", "=", 0)], [
-		Call("OpenForge"),
-	]),
-	E([C("Mouse", "on-object-clicked", { "mouse-button": "left", "click-type": "clicked", "object-clicked": "ForgeNPC" }), varIs("InHub", "=", 1), varIs("InForge", "=", 0), varIs("InMods", "=", 0), varIs("InStarMap", "=", 0), varIs("InMissionMap", "=", 0), varIs("GameOver", "=", 0)], [
-		Call("OpenForge"),
-	]),
+	E([
+		key(KEY.E), varIs("InHub", "=", 1), varIs("InForge", "=", 0), varIs("InMods", "=", 0), varIs("InStarMap", "=", 0), varIs("InMissionMap", "=", 0), varIs("GameOver", "=", 0),
+		cmp2("distance(Hero.X, Hero.Y, ForgeNPC.X, ForgeNPC.Y)", ">=", String(HUB_INTERACT)),
+	], [...msg(90, q("Подойди ближе к кузнецу"), "rgbEx(100, 70, 40)")]),
+	E([
+		key(KEY.E), varIs("InHub", "=", 1), varIs("InForge", "=", 0), varIs("InMods", "=", 0), varIs("InStarMap", "=", 0), varIs("InMissionMap", "=", 0), varIs("GameOver", "=", 0),
+		cmp2("distance(Hero.X, Hero.Y, ForgeNPC.X, ForgeNPC.Y)", "<", String(HUB_INTERACT)),
+	], [Call("OpenForge")]),
+	E([
+		C("Mouse", "on-object-clicked", { "mouse-button": "left", "click-type": "clicked", "object-clicked": "ForgeNPC" }),
+		varIs("InHub", "=", 1), varIs("InForge", "=", 0), varIs("InMods", "=", 0), varIs("InStarMap", "=", 0), varIs("InMissionMap", "=", 0), varIs("GameOver", "=", 0),
+		cmp2("distance(Hero.X, Hero.Y, ForgeNPC.X, ForgeNPC.Y)", ">=", String(HUB_INTERACT)),
+	], [...msg(90, q("Подойди ближе к кузнецу"), "rgbEx(100, 70, 40)")]),
+	E([
+		C("Mouse", "on-object-clicked", { "mouse-button": "left", "click-type": "clicked", "object-clicked": "ForgeNPC" }),
+		varIs("InHub", "=", 1), varIs("InForge", "=", 0), varIs("InMods", "=", 0), varIs("InStarMap", "=", 0), varIs("InMissionMap", "=", 0), varIs("GameOver", "=", 0),
+		cmp2("distance(Hero.X, Hero.Y, ForgeNPC.X, ForgeNPC.Y)", "<", String(HUB_INTERACT)),
+	], [Call("OpenForge")]),
 	E([C("Mouse", "on-object-clicked", { "mouse-button": "left", "click-type": "clicked", "object-clicked": "ForgeClose" }), varIs("InForge", "=", 1)], [
 		Call("CloseForge"),
 	]),
@@ -3031,9 +3361,9 @@ sheet("Game_ev", [
 		setVar("ObjectiveDone", 0),
 		setVar("SpawnReady", 0),
 		setVar("Wave", 0),
-		setVar("WaveMax", "3 + Floor(Mission / 4)"),
-		setVar("DefendHP", "180 + Layer * 40 + Mission * 8"),
-		setVar("DefendMaxHP", "180 + Layer * 40 + Mission * 8"),
+		setVar("WaveMax", WAVE_MAX_EXPR),
+		setVar("DefendHP", DEFEND_HP_EXPR),
+		setVar("DefendMaxHP", DEFEND_HP_EXPR),
 		setVar("Stealth", 0),
 		setVar("SpyProgress", 0),
 		setVar("Alarm", 0),
@@ -3121,7 +3451,7 @@ sheet("Game_ev", [
 		setVar("DefendY", String(POI.center[1])),
 		setVar("ObjectiveX", String(POI.center[0])),
 		setVar("ObjectiveY", String(POI.center[1])),
-		setVar("DefendMaxHP", "180 + Layer * 40 + Mission * 8"),
+		setVar("DefendMaxHP", DEFEND_HP_EXPR),
 		setVar("DefendHP", "DefendMaxHP"),
 		...spawnProp(POI.center[0], POI.center[1], "beacon"),
 		...msg(100, q("Оборона: найди бур и защити 6 волн!"), "rgbEx(80, 140, 180)"),
@@ -3156,27 +3486,29 @@ sheet("Game_ev", [
 	Fn("SpawnElite", [], [
 		setVar("EnemiesAlive", 0),
 		setVar("BossPhase", 1),
-		setVar("BossAlive", 1),
+		setVar("BossAlive", 0),
 		setVar("ObjectiveX", String(POI.center[0])),
 		setVar("ObjectiveY", String(POI.center[1])),
 		create("Enemy", "Game", String(POI.center[0]), String(POI.center[1])),
-		A("Enemy", "set-animation", { animation: `(Layer >= 5 ? "ancient" & Layer : "heavy" & Layer)`, from: "beginning" }),
-		A("Enemy", "set-scale", { scale: "1.2 + Layer * 0.06" }),
-		setIv("Enemy", "IsBoss", 1),
-		setIv("Enemy", "Archetype", "Layer >= 5 ? 7 : 4"),
+		A("Enemy", "set-animation", { animation: `(Layer >= 5 ? "ancient" & Layer : (Layer >= 3 ? "sniper" & Layer : "heavy" & Layer))`, from: "beginning" }),
+		A("Enemy", "set-scale", { scale: "1.25 + Layer * 0.06" }),
+		setIv("Enemy", "IsBoss", 0),
+		setIv("Enemy", "IsElite", 1),
+		setIv("Enemy", "Archetype", "Layer >= 5 ? 7 : (Layer >= 3 ? 2 : 4)"),
 		setIv("Enemy", "Agro", 1),
 		setIv("Enemy", "Alert", 1),
-		setIv("Enemy", "MaxHP", "70 + Layer * 25 + Mission * 10 + RoomsDone * 5"),
+		// HP ×3.5 от базы архетипа (slime*mult*3.5)
+		setIv("Enemy", "MaxHP", `(20 + RoomsDone * 5) * (Layer >= 5 ? 2.5 : (Layer >= 3 ? 0.7 : 3)) * 3.5`),
 		setIv("Enemy", "HP", "Self.MaxHP"),
-		setIv("Enemy", "Damage", "10 + Layer * 3 + Floor(Mission / 2)"),
-		setIv("Enemy", "Speed", "55 + Layer * 3"),
-		setIv("Enemy", "Bounty", "20 + Layer * 8 + Mission * 2"),
-		setIv("Enemy", "AtkCD", "0.55"),
+		setIv("Enemy", "Damage", `(8 + (${enemyLevel}) * 0.5) * (Layer >= 5 ? 0.6 : (Layer >= 3 ? 2 : 1.6)) * 1.3`),
+		setIv("Enemy", "Speed", `65 * (Layer >= 5 ? 0.6 : (Layer >= 3 ? 0.7 : 0.55))`),
+		setIv("Enemy", "Bounty", "25 + Layer * 8 + Mission * 2"),
+		setIv("Enemy", "AtkCD", "Layer >= 5 ? 2 : (Layer >= 3 ? 2.8 : 1.8)"),
 		setIv("Enemy", "PathAng", `angle(${POI.center[0]}, ${POI.center[1]}, Hero.X, Hero.Y)`),
 		addVar("EnemiesAlive", 1),
 		...spawnEnemyActions(POI.north[0], POI.north[1], 1),
 		...spawnEnemyActions(POI.south[0], POI.south[1], 0),
-		...msg(110, `"Узел-элита · " & LayerName`, "rgbEx(100, 70, 30)"),
+		...msg(110, `"Убей элиту · " & LayerName`, "rgbEx(100, 70, 30)"),
 	], []),
 
 	Fn("SpawnWorldBoss", [], [
@@ -3189,20 +3521,21 @@ sheet("Game_ev", [
 		A("Enemy", "set-animation", { animation: bossAnimExpr, from: "beginning" }),
 		A("Enemy", "set-scale", { scale: "1.45 + Layer * 0.12" }),
 		setIv("Enemy", "IsBoss", 1),
+		setIv("Enemy", "IsElite", 0),
 		setIv("Enemy", "Archetype", 1),
 		setIv("Enemy", "Agro", 1),
 		setIv("Enemy", "Alert", 1),
-		setIv("Enemy", "MaxHP", "140 + Layer * 55 + Mission * 8 + RoomsDone * 8"),
+		setIv("Enemy", "MaxHP", BOSS_HP_EXPR),
 		setIv("Enemy", "HP", "Self.MaxHP"),
-		setIv("Enemy", "Damage", "14 + Layer * 5"),
-		setIv("Enemy", "Speed", "48 + Layer * 4"),
-		setIv("Enemy", "Bounty", "40 + Layer * 15"),
-		setIv("Enemy", "AtkCD", "0.45"),
+		setIv("Enemy", "Damage", BOSS_DMG_EXPR),
+		setIv("Enemy", "Speed", BOSS_SPD_EXPR),
+		setIv("Enemy", "Bounty", String(BOSS_GOLD)),
+		setIv("Enemy", "AtkCD", String(BOSS_ATK_CD)),
 		setIv("Enemy", "PathAng", `angle(${POI.center[0]}, ${POI.center[1] - 80}, Hero.X, Hero.Y)`),
 		addVar("EnemiesAlive", 1),
 		...spawnEnemyActions(POI.west[0], POI.west[1], 1),
 		...spawnEnemyActions(POI.east[0], POI.east[1], 0),
-		...msg(130, `"БОСС МИРА · " & LayerName`, "rgbEx(100, 30, 20)"),
+		...msg(130, `"Победи голема · " & LayerName`, "rgbEx(100, 30, 20)"),
 	], []),
 
 	Fn("SpawnSpy", [], [
@@ -3242,25 +3575,44 @@ sheet("Game_ev", [
 		A("Hero", "set-ignoring-input", { input: "start-ignoring" }, "EightDir"),
 		A("GameOverText", "set-visible", { visibility: "visible" }),
 		A("GameOverText", "set-font-color", { color: "rgbEx(100, 40, 35)" }),
-		A("GameOverText", "set-text", { text: `"ПОРАЖЕНИЕ" & newline & newline & "Планета: " & LayerName & newline & "Узел: " & Mission & "/" & PlanetNodes & " · мир " & Layer & "/${PLANET_COUNT}" & newline & "Цель: " & MissionTypeName & "   Убито: " & Kills & newline & newline & "R — выбрать реликвию заново"` }),
+		A("GameOverText", "set-text", { text: `"ЭХО ОБОРВАЛОСЬ" & newline & newline & "Ты пал, но Эхо-врата вернут тебя к началу." & newline & LayerName & " · узел " & Mission & "/" & PlanetNodes & newline & "Убито: " & Kills & newline & newline & "R — выбрать реликвию заново"` }),
 		A("System", "set-time-scale", { "time-scale": "0" }),
 	]),
 	E([key(KEY.R)], [A("System", "go-to-layout", { layout: "Menu" })]),
 	E([key(KEY.P), varIs("GameOver", "=", 0)], [
-		A("System", "set-time-scale", { "time-scale": "timescale = 0 ? 1 : 0" }),
-		A("PauseText", "set-visible", { visibility: "toggle" }),
+		setVar("Paused", "1 - Paused"),
+	], [
+		E([varIs("Paused", "=", 1)], [
+			A("System", "set-time-scale", { "time-scale": "0" }),
+			A("PauseText", "set-visible", { visibility: "visible" }),
+			A("Hero", "set-ignoring-input", { input: "start-ignoring" }, "EightDir"),
+		]),
+		E([varIs("Paused", "=", 0)], [
+			A("System", "set-time-scale", { "time-scale": "1" }),
+			A("PauseText", "set-visible", { visibility: "invisible" }),
+			A("Hero", "set-ignoring-input", { input: "stop-ignoring" }, "EightDir"),
+		]),
 	]),
 
-	Comment("Стихия огня: DoT рядом"),
+	Comment("Стихия огня: DoT 3 / 0.45с в r=170 (ECH-8)"),
 	E([
-		varIs("Element", "=", 1), everySec(0.45), varIs("GameOver", "=", 0), varIs("InForge", "=", 0),
+		varIs("Element", "=", 1), everySec(0.45), varIs("GameOver", "=", 0), varIs("Paused", "=", 0), varIs("InForge", "=", 0),
 		C("Enemy", "pick-nearestfurthest", { which: "nearest", x: "Hero.X", y: "Hero.Y", z: "0", "pick-all-tied": false }),
 		cmp2("distance(Hero.X, Hero.Y, Enemy.X, Enemy.Y)", "<=", 170),
 	], [
-		Call("DamageEnemy", "Enemy.UID", "4 + Floor(RoomsDone / 2)"),
+		Call("DamageEnemy", "Enemy.UID", "3"),
+	]),
+	Comment("Стихия льда: замедление 35% (босс 15%) в r=150"),
+	E([
+		sys("every-tick"), varIs("Element", "=", 2), varIs("InMission", "=", 1), varIs("GameOver", "=", 0),
+		forEach("Enemy"), cmp2("distance(Enemy.X, Enemy.Y, Hero.X, Hero.Y)", "<=", "150"),
+	], [
+		A("Enemy", "set-speed", {
+			speed: `(Enemy.IsBoss = 1 ? Self.Speed * 0.85 : Self.Speed * 0.65)`,
+		}, "Bullet"),
 	]),
 
-	Comment("Босс: фаза 2 при ≤50% HP (временные цифры до таблицы GD)"),
+	Comment("Босс: фаза 2 при ≤50% HP (ECH-8)"),
 	E([
 		varIs("BossAlive", "=", 1), varIs("BossPhase", "=", 1), varIs("GameOver", "=", 0),
 		ivIs("Enemy", "IsBoss", "=", 1),
@@ -3268,35 +3620,42 @@ sheet("Game_ev", [
 		sys("trigger-once-while-true"),
 	], [
 		setVar("BossPhase", 2),
-		setIv("Enemy", "Speed", "Self.Speed + 40"),
-		setIv("Enemy", "Damage", "Self.Damage + 10"),
-		setIv("Enemy", "AtkCD", "0.25"),
+		setVar("IFrames", 1.5),
+		setIv("Enemy", "Speed", `Self.Speed + ${BOSS_P2_SPD}`),
+		setIv("Enemy", "Damage", `Self.Damage + ${BOSS_P2_DMG}`),
+		setIv("Enemy", "AtkCD", String(BOSS_P2_ATK_CD)),
 		A("Enemy", "set-scale", { scale: "1.9" }),
 		A("Enemy", "set-default-color", { color: "rgbEx(140, 25, 20)" }),
-		...spawnEnemyActions(POI.west[0], POI.west[1], 0),
-		...spawnEnemyActions(POI.east[0], POI.east[1], 0),
-		...spawnEnemyActions(POI.sw[0], POI.sw[1], 1),
-		...spawnEnemyActions(POI.se[0], POI.se[1], 2),
+		...spawnEnemyActions(POI.west[0], POI.west[1], 0, { bat: true, alert: 1 }),
+		...spawnEnemyActions(POI.east[0], POI.east[1], 0, { bat: true, alert: 1 }),
+		...spawnEnemyActions(POI.sw[0], POI.sw[1], 0, { bat: true, alert: 1 }),
+		...spawnEnemyActions(POI.se[0], POI.se[1], 0, { bat: true, alert: 1 }),
 		...fx("Enemy.X", "Enemy.Y", 180, "rgbEx(120, 20, 15)"),
-		...msg(140, q("ФАЗА 2 — ЯРОСТЬ!"), "rgbEx(120, 20, 15)"),
+		...msg(140, q("ЭХО ВЗРЫВАЕТСЯ — ФАЗА 2!"), "rgbEx(120, 20, 15)"),
 	]),
 
-	Comment("Босс фаза 2: периодический призыв аддов"),
+	Comment("Босс фаза 2: призыв bat каждые 9 с, лимит 8"),
 	E([
-		varIs("BossAlive", "=", 1), varIs("BossPhase", "=", 2), everySec(7),
+		varIs("BossAlive", "=", 1), varIs("BossPhase", "=", 2), everySec(BOSS_P2_SUMMON_SEC),
 		varIs("GameOver", "=", 0), cmp2("Enemy.Count", "<", 8),
 	], [
-		...spawnEnemyActions(`choose(${POI.north[0]}, ${POI.east[0]}, ${POI.west[0]})`, `choose(${POI.north[1]}, ${POI.south[1]}, ${POI.center[1]})`, 0),
-		...msg(80, q("+адд"), "rgbEx(90, 40, 30)"),
+		...spawnEnemyActions(`choose(${POI.north[0]}, ${POI.east[0]}, ${POI.west[0]})`, `choose(${POI.north[1]}, ${POI.south[1]}, ${POI.center[1]})`, 0, { bat: true, alert: 1 }),
+		...msg(80, q("+эхо-нетопырь"), "rgbEx(90, 40, 30)"),
 	]),
 
-	Comment("Босс: 1 гарант. ядро (не 3) + золото"),
+	Comment("Босс: +80з + 2 ядра + 1 мод"),
 	E([C("Enemy", "on-destroyed"), ivIs("Enemy", "IsBoss", "=", 1)], [
 		setVar("BossAlive", 0),
 		create("Core", "Game", "Enemy.X", "Enemy.Y - 20"),
 		setIv("Core", "Kind", "choose(1, 2, 3)"),
 		A("Core", "set-animation", { animation: `(Self.Kind = 1 ? "fire" : (Self.Kind = 2 ? "ice" : "shock"))`, from: "beginning" }),
-		addVar("Gold", 30),
+		create("Core", "Game", "Enemy.X + 24", "Enemy.Y - 10"),
+		setIv("Core", "Kind", "choose(1, 2, 3)"),
+		A("Core", "set-animation", { animation: `(Self.Kind = 1 ? "fire" : (Self.Kind = 2 ? "ice" : "shock"))`, from: "beginning" }),
+		create("ModPickup", "Game", "Enemy.X - 20", "Enemy.Y"),
+		setIv("ModPickup", "Kind", "choose(1, 2, 3, 4, 5)"),
+		A("ModPickup", "set-animation", { animation: `"m" & Self.Kind`, from: "beginning" }),
+		addVar("Gold", BOSS_GOLD),
 	]),
 
 	Comment("Лёгкий реген вне кузницы"),

@@ -1,37 +1,60 @@
+# --- курс / локальные сдачи (не в GitHub) ---
 лекции/
+ДЗ/
 *.mp4
 *.mkv
 *.avi
 *.mov
+*.webm
 
-ДЗ/
-
+# --- старый Dota-прототип ---
 Dota2D.c3p
 Dota2D_*.md
 Dota2D/
 
+# --- чужие дампы Construct (если появятся снова) ---
+tools/ex/
+tools/ref/
+tools/ocr/
+tools/**/frames/
+tools/**/*.png.bak
+
+# --- сборка / временные артефакты ---
+build/
+*.zip
+*.tmp
+*._tmp*
+*.bak
+*~
+*.swp
+*.c3p.bak
+*.c3save
+
+# --- Office / OneDrive ---
+~$*
+*.xlsx._tmp.xlsx
+*Conflict*
+*копия*
+* - копия.*
+
+# --- IDE / OS ---
+.vscode/
+.idea/
 .DS_Store
 Thumbs.db
 Desktop.ini
-.vscode/
-.idea/
+.cursor/
 
+# --- зависимости / кэш ---
 node_modules/
 npm-debug.log*
 *.log
 __pycache__/
 *.pyc
 .venv/
+venv/
+.env
+.env.*
 
-build/
-*.zip
-*.tmp
-*._tmp*
-
-tools/ocr/
-tools/**/frames/
-tools/**/*.png.bak
-
-~$*
-*.xlsx._tmp.xlsx
-
+# --- архивы ТЗ ---
+archive/
