@@ -7,13 +7,14 @@
 !EchoKnight.c3p
 !wiki/
 !wiki/**
+!ТЗ/
+!ТЗ/**
 
 # На всякий случай явно (если кто-то force-add)
 tools/
 ДЗ/
 лекции/
 build/
-archive/
 .vscode/
 .idea/
 .cursor/
