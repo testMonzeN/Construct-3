@@ -1,56 +1,25 @@
-# --- курс / локальные сдачи (не в GitHub) ---
-лекции/
+# В GitHub только: EchoKnight.c3p + wiki/ + этот файл.
+# Всё остальное (tools/, ДЗ/, лекции/, build/, задание GD, IDE…) — локально.
+
+*
+!.gitignore
+!EchoKnight.c3p
+!wiki/
+!wiki/**
+
+# На всякий случай явно (если кто-то force-add)
+tools/
 ДЗ/
-*.mp4
-*.mkv
-*.avi
-*.mov
-*.webm
-
-# --- старый Dota-прототип ---
-Dota2D.c3p
-Dota2D_*.md
-Dota2D/
-
-# --- сборка / временные артефакты ---
+лекции/
 build/
-*.zip
-*.tmp
-*._tmp*
-*.bak
-*~
-*.swp
-*.c3p.bak
-*.c3save
-
-# --- Office / OneDrive ---
-~$*
-*.xlsx._tmp.xlsx
-*Conflict*
-*копия*
-* - копия.*
-
-# --- IDE / OS ---
+archive/
 .vscode/
 .idea/
-.DS_Store
-Thumbs.db
-Desktop.ini
 .cursor/
-
-# --- зависимости / кэш ---
-node_modules/
-npm-debug.log*
-*.log
-__pycache__/
-*.pyc
-.venv/
-venv/
 .env
 .env.*
-
-# --- архивы ТЗ ---
-archive/
-
-# --- другие ---
-tools/
+*.mp4
+*.mkv
+*.zip
+*.log
+__pycache__/
